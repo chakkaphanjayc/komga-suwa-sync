@@ -8,6 +8,7 @@ import path from 'path';
 import { logger } from './utils/logger';
 import { SyncService } from './core/sync';
 import { EnhancedSyncService } from './core/enhancedSync';
+import { OptimizedSyncService } from './core/optimizedSync';
 import { MappingRepository } from './core/mappingRepo';
 import { KomgaClient } from './clients/komga';
 import { SuwaClient } from './clients/suwa';
@@ -21,6 +22,7 @@ class WebDashboard {
   private io: SocketServer;
   private syncService: SyncService;
   private enhancedSyncService: EnhancedSyncService;
+  private optimizedSyncService: OptimizedSyncService;
   private komgaClient: KomgaClient;
   private suwaClient: SuwaClient;
   private mappingRepo: MappingRepository;
@@ -50,11 +52,12 @@ class WebDashboard {
     this.matcher = new Matcher();
     this.syncService = new SyncService(this.komgaClient, this.suwaClient, this.mappingRepo, this.matcher);
     this.enhancedSyncService = new EnhancedSyncService(this.komgaClient, this.suwaClient, this.mappingRepo, this.matcher);
+    this.optimizedSyncService = new OptimizedSyncService(this.komgaClient, this.suwaClient, this.mappingRepo, this.matcher);
     this.eventListener = new EventListener({
       komgaClient: this.komgaClient,
       suwaClient: this.suwaClient,
       mappingRepo: this.mappingRepo,
-      enhancedSyncService: this.enhancedSyncService,
+      enhancedSyncService: this.optimizedSyncService,
       eventCheckInterval: parseInt(process.env.EVENT_CHECK_INTERVAL_MS || '10000'),
       recentWindowHours: parseInt(process.env.RECENT_READ_HOURS || '1')
     });
@@ -229,8 +232,8 @@ class WebDashboard {
         pass: process.env.SUWA_PASS ? '********' : ''
       },
       sync: {
-        interval: process.env.SYNC_INTERVAL_MS || '30000',
-        fullSyncInterval: process.env.FULL_SYNC_INTERVAL_MS || '21600000',
+        interval: process.env.SYNC_INTERVAL_MS || '15000',
+        fullSyncInterval: process.env.FULL_SYNC_INTERVAL_MS || '1800000',
         threshold: process.env.FUZZY_THRESHOLD || '0.8',
         level: process.env.LOG_LEVEL || 'info',
         dryRun: process.env.SYNC_DRY_RUN || 'false',
@@ -323,8 +326,8 @@ class WebDashboard {
         this.updateEnvLine(lines, 'SUWA_PASS', config['suwa-pass']);
       } else if (type === 'sync') {
         // Provide defaults for empty sync values
-        this.updateEnvLine(lines, 'SYNC_INTERVAL_MS', config['sync-interval'] || '30000');
-        this.updateEnvLine(lines, 'FULL_SYNC_INTERVAL_MS', config['full-sync-interval'] || '21600000');
+        this.updateEnvLine(lines, 'SYNC_INTERVAL_MS', config['sync-interval'] || '15000');
+        this.updateEnvLine(lines, 'FULL_SYNC_INTERVAL_MS', config['full-sync-interval'] || '1800000');
         this.updateEnvLine(lines, 'FUZZY_THRESHOLD', config['fuzzy-threshold'] || '0.8');
         this.updateEnvLine(lines, 'LOG_LEVEL', config['log-level'] || 'info');
         this.updateEnvLine(lines, 'SYNC_DIRECTION', config['sync-direction'] || 'bidirectional');
@@ -355,6 +358,8 @@ class WebDashboard {
     
     // Recreate sync service with new clients
     this.syncService = new SyncService(this.komgaClient, this.suwaClient, this.mappingRepo, this.matcher);
+    this.enhancedSyncService = new EnhancedSyncService(this.komgaClient, this.suwaClient, this.mappingRepo, this.matcher);
+    this.optimizedSyncService = new OptimizedSyncService(this.komgaClient, this.suwaClient, this.mappingRepo, this.matcher);
   }
 
   private async testConnections(req: any, res: any) {
@@ -831,7 +836,7 @@ class WebDashboard {
       });
 
       // Run the enhanced sync
-      await this.enhancedSyncService.sync({
+      await this.optimizedSyncService.sync({
         mode: 'full',
         direction: (process.env.SYNC_DIRECTION as any) || 'bidirectional'
       });
@@ -898,7 +903,7 @@ class WebDashboard {
       });
 
       // Run event-based sync
-      await this.enhancedSyncService.sync({
+      await this.optimizedSyncService.sync({
         mode: 'event-based',
         maxHoursForRecent: parseInt(process.env.RECENT_READ_HOURS || '24'),
         direction: (process.env.SYNC_DIRECTION as any) || 'bidirectional'
@@ -967,7 +972,7 @@ class WebDashboard {
       });
 
       // Run full library sync
-      await this.enhancedSyncService.sync({
+      await this.optimizedSyncService.sync({
         mode: 'full',
         direction: (process.env.SYNC_DIRECTION as any) || 'bidirectional'
       });
@@ -1028,7 +1033,7 @@ class WebDashboard {
       });
 
       // Run directional sync
-      await this.enhancedSyncService.sync({
+      await this.optimizedSyncService.sync({
         mode: 'full',
         direction: 'suwa-to-komga'
       });
@@ -1096,7 +1101,7 @@ class WebDashboard {
       });
 
       // Run directional sync
-      await this.enhancedSyncService.sync({
+      await this.optimizedSyncService.sync({
         mode: 'full',
         direction: 'komga-to-suwa'
       });
@@ -1182,7 +1187,7 @@ class WebDashboard {
           });
           break;
         case 'sync-komga-to-suwa':
-          await this.enhancedSyncService.sync({
+          await this.optimizedSyncService.sync({
             mode: 'full',
             direction: 'komga-to-suwa'
           });
@@ -1192,7 +1197,7 @@ class WebDashboard {
           });
           break;
         case 'sync-suwa-to-komga':
-          await this.enhancedSyncService.sync({
+          await this.optimizedSyncService.sync({
             mode: 'full',
             direction: 'suwa-to-komga'
           });
@@ -1219,13 +1224,13 @@ class WebDashboard {
 
     this.isRunning = true;
   // Prefer SYNC_INTERVAL_MS (saved via web UI) but fall back to EVENT_SYNC_INTERVAL_MS for legacy
-  const eventBasedInterval = parseInt(process.env.SYNC_INTERVAL_MS || process.env.EVENT_SYNC_INTERVAL_MS || '30000'); // 30 seconds default
-    const fullSyncInterval = parseInt(process.env.FULL_SYNC_INTERVAL_MS || '21600000'); // 6 hours default
+  const eventBasedInterval = parseInt(process.env.SYNC_INTERVAL_MS || process.env.EVENT_SYNC_INTERVAL_MS || '15000'); // 15 seconds default (more frequent with optimization)
+    const fullSyncInterval = parseInt(process.env.FULL_SYNC_INTERVAL_MS || '1800000'); // 30 minutes default (more frequent with optimization)
 
     // Start frequent event-based sync for recently read manga
     this.syncInterval = setInterval(async () => {
       try {
-        await this.enhancedSyncService.sync({
+        await this.optimizedSyncService.sync({
           mode: 'event-based',
           maxHoursForRecent: parseInt(process.env.RECENT_READ_HOURS || '24'),
           direction: (process.env.SYNC_DIRECTION as any) || 'bidirectional'
@@ -1260,7 +1265,7 @@ class WebDashboard {
     // Start periodic full library sync
     this.fullSyncInterval = setInterval(async () => {
       try {
-        await this.enhancedSyncService.sync({
+        await this.optimizedSyncService.sync({
           mode: 'full',
           direction: (process.env.SYNC_DIRECTION as any) || 'bidirectional'
         });
@@ -1300,11 +1305,11 @@ class WebDashboard {
     });
 
     this.io.emit('activity', {
-      message: 'Enhanced sync service started (event-based + periodic full sync + event listener)',
+      message: 'Optimized sync service started (event-based + periodic full sync + event listener) with caching and rate limiting',
       type: 'system'
     });
 
-    logger.info({ eventBasedInterval, fullSyncInterval }, 'Enhanced sync service started');
+    logger.info({ eventBasedInterval, fullSyncInterval }, 'Optimized sync service started');
   }
 
   private stopSync() {
@@ -1332,11 +1337,11 @@ class WebDashboard {
     });
 
     this.io.emit('activity', {
-      message: 'Enhanced sync service and event listener stopped',
+      message: 'Optimized sync service and event listener stopped',
       type: 'system'
     });
 
-    logger.info('Enhanced sync service and event listener stopped');
+    logger.info('Optimized sync service and event listener stopped');
   }
 
   private async runMatch() {

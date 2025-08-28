@@ -2,13 +2,24 @@ import { KomgaClient } from '../clients/komga';
 import { SuwaClient } from '../clients/suwa';
 import { MappingRepository } from './mappingRepo';
 import { EnhancedSyncService } from './enhancedSync';
+import { OptimizedSyncService } from './optimizedSync';
 import { logger } from '../utils/logger';
+
+// Common interface for sync services
+interface SyncService {
+  sync(options: {
+    mode: 'full' | 'recent' | 'event-based';
+    maxHoursForRecent?: number;
+    forceFullSync?: boolean;
+    direction?: 'bidirectional' | 'komga-to-suwa' | 'suwa-to-komga';
+  }): Promise<void>;
+}
 
 export interface EventListenerOptions {
   komgaClient: KomgaClient;
   suwaClient: SuwaClient;
   mappingRepo: MappingRepository;
-  enhancedSyncService: EnhancedSyncService;
+  enhancedSyncService: SyncService;
   eventCheckInterval?: number; // How often to check for events (default: 10 seconds)
   recentWindowHours?: number; // How far back to look for events (default: 1 hour)
 }
@@ -17,7 +28,7 @@ export class EventListener {
   private komgaClient: KomgaClient;
   private suwaClient: SuwaClient;
   private mappingRepo: MappingRepository;
-  private enhancedSyncService: EnhancedSyncService;
+  private enhancedSyncService: SyncService;
   private eventCheckInterval: number;
   private recentWindowHours: number;
   private intervalId: NodeJS.Timeout | null = null;
