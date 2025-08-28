@@ -1,0 +1,9 @@
+version: "3.9"
+services:
+  sync:
+    build: .
+    container_name: komga-suwa-sync
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
