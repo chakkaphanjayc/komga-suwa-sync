@@ -6,7 +6,7 @@ services:
     container_name: komga-suwa-sync
     env_file: .env
     volumes:
-      - ./data:/app/data
+      - "sync-data:/app/data"
       - ./public:/app/public:ro
     ports:
       - "3000:3000"
@@ -19,10 +19,13 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
-    user: "1000:1000"  # Use host user ID instead of container appuser
     networks:
       - sync-network
 
 networks:
   sync-network:
     driver: bridge
+
+volumes:
+  sync-data:
+    driver: local

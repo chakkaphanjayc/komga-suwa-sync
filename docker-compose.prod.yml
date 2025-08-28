@@ -13,7 +13,7 @@ services:
     container_name: komga-suwa-sync-prod
     env_file: .env
     volumes:
-      - ./data:/app/data
+      - "sync-data:/app/data"
       - ./public:/app/public:ro
       # Optional: Mount logs directory for persistent logging
       - ./logs:/app/logs
@@ -29,7 +29,7 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
-    user: "1000:1000"
+  # run as image user (do not override)
     networks:
       - sync-network
     # Production resource limits
@@ -73,16 +73,6 @@ networks:
 # =================================================================
 # Uncomment and configure these for production data persistence
 
-# volumes:
-#   sync-data:
-#     driver: local
-#     driver_opts:
-#       o: bind
-#       type: none
-#       device: /path/to/production/data
-#   sync-logs:
-#     driver: local
-#     driver_opts:
-#       o: bind
-#       type: none
-#       device: /path/to/production/logs
+volumes:
+  sync-data:
+    driver: local
