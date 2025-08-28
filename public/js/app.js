@@ -4,11 +4,14 @@
 class SyncDashboard {
     constructor() {
         this.socket = null;
-        this.currentTab = 'dashboard';
+        this.currentTab = localStorage.getItem('currentTab') || 'dashboard';
         this.logs = [];
         this.activityLog = [];
         this.komgaManga = []; // Store full Komga manga data
         this.suwayomiManga = []; // Store full Suwayomi manga data
+        this.syncTimer = null;
+        this.countdownInterval = null;
+        this.theme = localStorage.getItem('theme') || 'dark';
         this.init();
     }
 
@@ -17,6 +20,10 @@ class SyncDashboard {
         this.setupEventListeners();
         this.loadInitialData();
         this.startStatusUpdates();
+        this.loadConfiguration();
+        this.applyTheme();
+        this.showTab(this.currentTab);
+        this.startAutoSync();
     }
 
     connectWebSocket() {
@@ -50,13 +57,38 @@ class SyncDashboard {
     }
 
     setupEventListeners() {
-        // Tab switching
+        // Tab switching - use data-tab attributes instead of onclick
         document.querySelectorAll('.tab-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
-                const tabId = e.target.onclick.toString().match(/'([^']+)'/)[1];
-                this.showTab(tabId);
+                const tabId = e.target.closest('.tab-btn').dataset.tab;
+                if (tabId) {
+                    this.showTab(tabId);
+                }
             });
         });
+
+        // Theme toggle
+        const themeToggle = document.getElementById('theme-toggle');
+        if (themeToggle) {
+            themeToggle.addEventListener('click', () => {
+                this.toggleTheme();
+            });
+        }
+
+        // URL buttons
+        const komgaUrlBtn = document.getElementById('open-komga');
+        const suwayomiUrlBtn = document.getElementById('open-suwayomi');
+
+        if (komgaUrlBtn) {
+            komgaUrlBtn.addEventListener('click', () => {
+                this.openKomgaUrl();
+            });
+        }
+        if (suwayomiUrlBtn) {
+            suwayomiUrlBtn.addEventListener('click', () => {
+                this.openSuwayomiUrl();
+            });
+        }
 
         // Configuration forms
         document.getElementById('komga-config').addEventListener('submit', (e) => {
@@ -121,23 +153,18 @@ class SyncDashboard {
             this.testAPI('suwa');
         });
 
-        document.getElementById('test-komga-series').addEventListener('click', () => {
-            this.quickAPITest('komga-series');
-        });
+        // Search functionality
+        const activitySearch = document.getElementById('activity-search');
+        const syncLogSearch = document.getElementById('sync-log-search');
 
-        document.getElementById('test-suwa-library').addEventListener('click', () => {
-            this.quickAPITest('suwa-library');
-        });
-
-        document.getElementById('test-mapping-count').addEventListener('click', () => {
-            this.quickAPITest('mapping-count');
-        });
-
-        // Only add GraphQL test listener if element exists
-        const graphqlBtn = document.getElementById('test-graphql');
-        if (graphqlBtn) {
-            graphqlBtn.addEventListener('click', () => {
-                this.testCustomGraphQL();
+        if (activitySearch) {
+            activitySearch.addEventListener('input', (e) => {
+                this.filterActivity(e.target.value);
+            });
+        }
+        if (syncLogSearch) {
+            syncLogSearch.addEventListener('input', (e) => {
+                this.filterSyncLog();
             });
         }
 
@@ -196,7 +223,10 @@ class SyncDashboard {
         document.querySelectorAll('.tab-btn').forEach(btn => {
             btn.classList.remove('active');
         });
-        document.querySelector(`[onclick="showTab('${tabId}')"]`).classList.add('active');
+        const activeTabBtn = document.querySelector(`[data-tab="${tabId}"]`);
+        if (activeTabBtn) {
+            activeTabBtn.classList.add('active');
+        }
 
         // Update tab content
         document.querySelectorAll('.tab-content').forEach(content => {
@@ -205,6 +235,7 @@ class SyncDashboard {
         document.getElementById(tabId).classList.add('active');
 
         this.currentTab = tabId;
+        localStorage.setItem('currentTab', tabId);
 
         // Log navigation event
         this.logUserEvent('navigation', {
@@ -214,7 +245,7 @@ class SyncDashboard {
         this.previousTab = tabId;
 
         // Load tab-specific data
-        if (tabId === 'management') {
+        if (tabId === 'configuration') {
             this.loadConfig();
             this.checkAPIStatus();
         } else if (tabId === 'mappings') {
@@ -326,26 +357,227 @@ class SyncDashboard {
         });
     }
 
+    // Theme management
+    applyTheme() {
+        document.documentElement.setAttribute('data-theme', this.theme);
+        const themeToggle = document.getElementById('theme-toggle');
+        if (themeToggle) {
+            const icon = themeToggle.querySelector('i');
+            if (this.theme === 'dark') {
+                icon.className = 'fas fa-sun';
+                themeToggle.title = 'Switch to Light Mode';
+            } else {
+                icon.className = 'fas fa-moon';
+                themeToggle.title = 'Switch to Dark Mode';
+            }
+        }
+    }
+
+    toggleTheme() {
+        this.theme = this.theme === 'dark' ? 'light' : 'dark';
+        localStorage.setItem('theme', this.theme);
+        this.applyTheme();
+        this.showNotification(`Switched to ${this.theme} mode`, 'info');
+    }
+
+    // URL opening
+    openKomgaUrl() {
+        this.loadConfig().then(config => {
+            if (config.komga && config.komga.base) {
+                window.open(config.komga.base, '_blank');
+            } else {
+                this.showNotification('Komga URL not configured', 'error');
+            }
+        });
+    }
+
+    openSuwayomiUrl() {
+        this.loadConfig().then(config => {
+            if (config.suwa && config.suwa.base) {
+                window.open(config.suwa.base, '_blank');
+            } else {
+                this.showNotification('Suwayomi URL not configured', 'error');
+            }
+        });
+    }
+
+    // Auto-start functionality
+    startAutoSync() {
+        // Load configuration and start auto-sync if enabled
+        this.loadConfig().then(config => {
+            if (config.sync && config.sync.autoStart !== false) {
+                this.showNotification('Auto-starting connections and sync...', 'info');
+                setTimeout(() => {
+                    this.testConnectionsAndSync();
+                }, 2000); // Wait 2 seconds for page to load
+            }
+        });
+    }
+
+    // Countdown timer for sync
+    startCountdownTimer(intervalMs) {
+        if (this.countdownInterval) {
+            clearInterval(this.countdownInterval);
+        }
+
+        const countdownElement = document.getElementById('sync-countdown');
+        if (!countdownElement) return;
+
+        let remaining = intervalMs;
+
+        this.countdownInterval = setInterval(() => {
+            remaining -= 1000;
+
+            if (remaining <= 0) {
+                countdownElement.textContent = 'Syncing...';
+                clearInterval(this.countdownInterval);
+                this.countdownInterval = null;
+                return;
+            }
+
+            const minutes = Math.floor(remaining / 60000);
+            const seconds = Math.floor((remaining % 60000) / 1000);
+            countdownElement.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+        }, 1000);
+    }
+
+    // Load configuration from env file
+    async loadConfiguration() {
+        try {
+            const response = await fetch('/api/config');
+            const config = await response.json();
+
+            // Populate form fields with saved configuration
+            this.populateConfigForms(config);
+            this.showNotification('Configuration loaded from environment', 'success');
+        } catch (error) {
+            console.error('Load configuration error:', error);
+            this.showNotification('Failed to load saved configuration', 'error');
+        }
+    }
+
+    populateConfigForms(config) {
+        // Populate Komga config
+        if (config.komga) {
+            Object.keys(config.komga).forEach(key => {
+                const element = document.getElementById(`komga-${key}`);
+                if (element) {
+                    element.value = config.komga[key];
+                }
+            });
+        }
+
+        // Populate Suwayomi config
+        if (config.suwa) {
+            Object.keys(config.suwa).forEach(key => {
+                const element = document.getElementById(`suwa-${key}`);
+                if (element) {
+                    element.value = config.suwa[key];
+                }
+            });
+        }
+
+        // Populate sync config
+        if (config.sync) {
+            // Map server config keys to HTML form field names
+            const syncFieldMapping = {
+                interval: 'sync-interval',
+                threshold: 'fuzzy-threshold',
+                level: 'log-level',
+                dryRun: 'dry-run'
+            };
+
+            Object.keys(config.sync).forEach(key => {
+                const fieldName = syncFieldMapping[key] || `sync-${key}`;
+                const element = document.getElementById(fieldName);
+                if (element) {
+                    if (element.type === 'checkbox') {
+                        element.checked = config.sync[key] === 'true' || config.sync[key] === true;
+                    } else {
+                        element.value = config.sync[key];
+                    }
+                }
+            });
+
+            // Start countdown timer if sync interval is set
+            if (config.sync.interval) {
+                this.startCountdownTimer(parseInt(config.sync.interval));
+            }
+        }
+    }
+
+    // Filter activity log
+    filterActivity(searchTerm) {
+        const activityContainer = document.getElementById('activity-log');
+        const items = activityContainer.querySelectorAll('.activity-item');
+
+        if (!searchTerm.trim()) {
+            items.forEach(item => item.style.display = 'block');
+            return;
+        }
+
+        const searchLower = searchTerm.toLowerCase().trim();
+        items.forEach(item => {
+            const text = item.textContent.toLowerCase();
+            item.style.display = text.includes(searchLower) ? 'block' : 'none';
+        });
+    }
+
+    // Filter sync log
+    filterSyncLog() {
+        const searchInput = document.getElementById('sync-log-search');
+        const filterSelect = document.getElementById('sync-log-filter');
+
+        if (!searchInput || !filterSelect) return;
+
+        const searchTerm = searchInput.value.toLowerCase().trim();
+        const filterValue = filterSelect.value;
+
+        const containers = ['komga-sync-entries', 'suwayomi-sync-entries'];
+        containers.forEach(containerId => {
+            const container = document.getElementById(containerId);
+            if (!container) return;
+
+            const items = container.querySelectorAll('.sync-activity-item');
+            items.forEach(item => {
+                const text = item.textContent.toLowerCase();
+                const matchesSearch = !searchTerm || text.includes(searchTerm);
+                const matchesFilter = filterValue === 'all' || item.classList.contains(`status-${filterValue}`);
+
+                item.style.display = (matchesSearch && matchesFilter) ? 'block' : 'none';
+            });
+        });
+    }
+
     async saveConfig(type) {
         const form = document.getElementById(`${type}-config`);
         const formData = new FormData(form);
         const config = {};
 
         for (let [key, value] of formData.entries()) {
-            config[key] = value;
+            // Map HTML form field names back to server config keys
+            let configKey = key;
+            if (type === 'komga') {
+                configKey = key.replace('komga-', '');
+            } else if (type === 'suwa') {
+                configKey = key.replace('suwa-', '');
+            } else if (type === 'sync') {
+                // Map HTML field names back to server config keys
+                const reverseSyncFieldMapping = {
+                    'sync-interval': 'interval',
+                    'fuzzy-threshold': 'threshold',
+                    'log-level': 'level',
+                    'dry-run': 'dryRun'
+                };
+                configKey = reverseSyncFieldMapping[key] || key.replace('sync-', '');
+            }
+            config[configKey] = value;
         }
 
         // Handle authentication method selection for Suwayomi
         if (type === 'suwa') {
-            const activeTab = document.querySelector('.auth-tab.active');
-            if (activeTab && activeTab.textContent.includes('Basic')) {
-                // Clear token if basic auth is selected
-                config['suwa-token'] = '';
-            } else {
-                // Clear basic auth if token is selected
-                config['suwa-user'] = '';
-                config['suwa-pass'] = '';
-            }
+            // Only basic auth is supported now
+            config['token'] = '';
         }
 
         try {
@@ -359,6 +591,8 @@ class SyncDashboard {
 
             if (response.ok) {
                 this.showNotification('Configuration saved successfully', 'success');
+                // Reload configuration to update forms
+                this.loadConfiguration();
             } else {
                 throw new Error('Failed to save configuration');
             }
@@ -376,7 +610,23 @@ class SyncDashboard {
             // Populate form fields
             Object.keys(config).forEach(section => {
                 Object.keys(config[section]).forEach(key => {
-                    const element = document.getElementById(`${key}`);
+                    // Map server config keys to HTML form field names
+                    let fieldName;
+                    if (section === 'komga') {
+                        fieldName = `komga-${key}`;
+                    } else if (section === 'suwa') {
+                        fieldName = `suwa-${key}`;
+                    } else if (section === 'sync') {
+                        const syncFieldMapping = {
+                            interval: 'sync-interval',
+                            threshold: 'fuzzy-threshold',
+                            level: 'log-level',
+                            dryRun: 'dry-run'
+                        };
+                        fieldName = syncFieldMapping[key] || `sync-${key}`;
+                    }
+
+                    const element = document.getElementById(fieldName);
                     if (element) {
                         if (element.type === 'checkbox') {
                             element.checked = config[section][key] === 'true';
@@ -387,14 +637,10 @@ class SyncDashboard {
                 });
             });
 
-            // Set authentication method based on available credentials
-            if (config.suwa && config.suwa.user && config.suwa.pass) {
-                this.switchAuthMethod('basic');
-            } else {
-                this.switchAuthMethod('token');
-            }
+            return config;
         } catch (error) {
             console.error('Load config error:', error);
+            return {};
         }
     }
 
@@ -589,15 +835,8 @@ class SyncDashboard {
     }
 
     switchAuthMethod(method) {
-        // Update tab buttons
-        document.querySelectorAll('.auth-tab').forEach(tab => {
-            tab.classList.remove('active');
-        });
-        document.querySelector(`[onclick="switchAuthMethod('${method}')"]`).classList.add('active');
-
-        // Update form fields
-        document.getElementById('token-auth').style.display = method === 'token' ? 'block' : 'none';
-        document.getElementById('basic-auth').style.display = method === 'basic' ? 'block' : 'none';
+        // This method is deprecated - only basic auth is now supported for Suwayomi
+        console.warn('switchAuthMethod is deprecated - only basic auth is supported');
     }
 
     async testConnectionsAndSync() {
@@ -617,13 +856,19 @@ class SyncDashboard {
                 this.showNotification('Connections tested successfully and sync started!', 'success');
                 // Refresh matched manga after successful connection
                 this.loadMatchedManga();
+                // Start countdown timer
+                this.loadConfig().then(config => {
+                    if (config.sync && config.sync.interval) {
+                        this.startCountdownTimer(parseInt(config.sync.interval));
+                    }
+                });
             } else {
                 let message = 'Connection test failed:\n';
                 if (results.komga && !results.komga.success) {
                     message += `Komga: ${results.komga.error}\n`;
                 }
-                if (results.suwayomi && !results.suwayomi.success) {
-                    message += `Suwayomi: ${results.suwayomi.error}`;
+                if (results.suwa && !results.suwa.success) {
+                    message += `Suwayomi: ${results.suwa.error}`;
                 }
                 this.showNotification(message, 'error');
             }
@@ -671,7 +916,7 @@ class SyncDashboard {
             item.className = 'matched-item invalid-mapping';
 
             const komgaTitle = match.komga ? match.komga.metadata.title : 'Unknown (Deleted)';
-            const suwaTitle = match.suwayomi ? match.suwayomi.title : 'Unknown (Deleted)';
+            const suwaTitle = match.suwa ? match.suwa.title : 'Unknown (Deleted)';
 
             item.innerHTML = `
                 <div class="matched-header invalid">
@@ -700,7 +945,7 @@ class SyncDashboard {
             item.className = 'matched-item valid-mapping';
 
             const komgaTitle = match.komga ? match.komga.metadata.title : 'Unknown';
-            const suwaTitle = match.suwayomi ? match.suwayomi.title : 'Unknown';
+            const suwaTitle = match.suwa ? match.suwa.title : 'Unknown';
 
             item.innerHTML = `
                 <div class="matched-header valid">
@@ -1391,6 +1636,12 @@ class SyncDashboard {
                 if (data.success) {
                     this.showSuccess('Manual sync completed successfully');
                     this.loadSyncLog(); // Refresh the log
+                    // Start countdown timer
+                    this.loadConfig().then(config => {
+                        if (config.sync && config.sync.interval) {
+                            this.startCountdownTimer(parseInt(config.sync.interval));
+                        }
+                    });
                 } else {
                     this.showError('Manual sync failed: ' + (data.error || 'Unknown error'));
                 }
@@ -1443,6 +1694,12 @@ class SyncDashboard {
                 if (data.success) {
                     this.showSuccess('Komga → Suwayomi sync completed successfully');
                     this.loadSyncLog(); // Refresh the log
+                    // Start countdown timer
+                    this.loadConfig().then(config => {
+                        if (config.sync && config.sync.interval) {
+                            this.startCountdownTimer(parseInt(config.sync.interval));
+                        }
+                    });
                 } else {
                     this.showError('Sync failed: ' + (data.error || 'Unknown error'));
                 }
@@ -1476,6 +1733,12 @@ class SyncDashboard {
                 if (data.success) {
                     this.showSuccess('Suwayomi → Komga sync completed successfully');
                     this.loadSyncLog(); // Refresh the log
+                    // Start countdown timer
+                    this.loadConfig().then(config => {
+                        if (config.sync && config.sync.interval) {
+                            this.startCountdownTimer(parseInt(config.sync.interval));
+                        }
+                    });
                 } else {
                     this.showError('Sync failed: ' + (data.error || 'Unknown error'));
                 }

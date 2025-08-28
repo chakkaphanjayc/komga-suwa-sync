@@ -40,12 +40,12 @@ class WebDashboard {
     }
     setupMiddleware() {
         this.app.use(express_1.default.json());
-        this.app.use(express_1.default.static(path_1.default.join(__dirname, '../public')));
+        this.app.use(express_1.default.static(path_1.default.join(process.cwd(), 'public')));
     }
     setupRoutes() {
         // Serve main dashboard
         this.app.get('/', (req, res) => {
-            res.sendFile(path_1.default.join(__dirname, '../public/index.html'));
+            res.sendFile(path_1.default.join(process.cwd(), 'public/index.html'));
         });
         // Health endpoint
         this.app.get('/health', (req, res) => {
@@ -256,7 +256,7 @@ class WebDashboard {
         try {
             const fs = require('fs');
             const path = require('path');
-            const envPath = path.join(__dirname, '../../.env');
+            const envPath = path.join(process.cwd(), '.env');
             let envContent = '';
             if (fs.existsSync(envPath)) {
                 envContent = fs.readFileSync(envPath, 'utf8');

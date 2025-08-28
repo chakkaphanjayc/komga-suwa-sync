@@ -6,70 +6,148 @@
     <title>Komga-Suwayomi Sync Dashboard</title>
     <link rel="stylesheet" href="/css/style.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.0/socket.io.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
 </head>
-<body>
+<body class="dark-mode">
     <div class="container">
         <header>
-            <h1>Komga-Suwayomi Sync Dashboard</h1>
-            <div class="status-bar">
-                <span id="sync-status" class="status">Status: <span class="status-text">Unknown</span></span>
-                <span id="last-sync" class="status">Last Sync: <span class="status-text">Never</span></span>
+            <div class="header-content">
+                <h1><i class="fas fa-sync-alt"></i> Komga-Suwayomi Sync</h1>
+                <div class="header-controls">
+                    <button id="theme-toggle" class="theme-toggle" title="Toggle Dark/Light Mode">
+                        <i class="fas fa-moon"></i>
+                    </button>
+                    <div class="status-bar">
+                        <span id="sync-status" class="status">Status: <span class="status-text">Unknown</span></span>
+                        <span id="last-sync" class="status">Last Sync: <span class="status-text">Never</span></span>
+                        <span id="next-sync" class="status">Next Sync: <span class="status-text countdown" id="sync-countdown">--:--</span></span>
+                    </div>
+                </div>
             </div>
         </header>
 
         <nav class="nav-tabs">
-            <button class="tab-btn active" onclick="showTab('dashboard')">Dashboard</button>
-            <button class="tab-btn" onclick="showTab('manga-lists')">Manga Lists</button>
-            <button class="tab-btn" onclick="showTab('management')">Management</button>
-            <button class="tab-btn" onclick="showTab('mappings')">Mappings</button>
-            <button class="tab-btn" onclick="showTab('sync-log')">Sync Log</button>
+            <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
+            <button class="tab-btn" data-tab="manga-lists">Manga Lists</button>
+            <button class="tab-btn" data-tab="configuration">Configuration</button>
+            <button class="tab-btn" data-tab="mappings">Mappings</button>
         </nav>
 
         <main>
+            <!-- Dashboard Tab -->
             <div id="dashboard" class="tab-content active">
                 <div class="stats-grid">
                     <div class="stat-card">
+                        <div class="stat-icon"><i class="fas fa-book"></i></div>
                         <h3>Series Mappings</h3>
                         <div class="stat-number" id="series-count">-</div>
                     </div>
                     <div class="stat-card">
+                        <div class="stat-icon"><i class="fas fa-file-alt"></i></div>
                         <h3>Chapter Mappings</h3>
                         <div class="stat-number" id="chapter-count">-</div>
                     </div>
                     <div class="stat-card">
+                        <div class="stat-icon"><i class="fas fa-clock"></i></div>
                         <h3>Sync Cycles</h3>
                         <div class="stat-number" id="sync-cycles">-</div>
                     </div>
                     <div class="stat-card">
+                        <div class="stat-icon"><i class="fas fa-exclamation-triangle"></i></div>
                         <h3>Errors</h3>
                         <div class="stat-number error" id="error-count">-</div>
                     </div>
                 </div>
 
                 <div class="control-panel">
-                    <h3>Sync Controls</h3>
+                    <h3><i class="fas fa-cogs"></i> Sync Controls</h3>
                     <div class="control-buttons">
-                        <button id="test-connections-and-sync" class="btn btn-primary">Test Connections & Start Sync</button>
-                        <button id="start-sync" class="btn btn-success">Start Sync</button>
-                        <button id="stop-sync" class="btn btn-danger">Stop Sync</button>
-                        <button id="run-match" class="btn btn-secondary">Run Initial Match</button>
-                        <button id="test-connections" class="btn btn-info">Test Connections</button>
+                        <button id="test-connections-and-sync" class="btn btn-primary">
+                            <i class="fas fa-play-circle"></i> Test & Start Sync
+                        </button>
+                        <button id="start-sync" class="btn btn-success">
+                            <i class="fas fa-play"></i> Start Sync
+                        </button>
+                        <button id="stop-sync" class="btn btn-danger">
+                            <i class="fas fa-stop"></i> Stop Sync
+                        </button>
+                        <button id="run-match" class="btn btn-secondary">
+                            <i class="fas fa-search"></i> Run Initial Match
+                        </button>
                     </div>
                 </div>
 
-                <div class="recent-activity">
-                    <h3>Recent Activity</h3>
-                    <div id="activity-log" class="activity-list"></div>
-                </div>
-
-                <div class="matched-manga-section">
-                    <h3>Matched Manga</h3>
-                    <div class="matched-manga-controls">
-                        <button id="refresh-matched" class="btn btn-primary">Refresh Matched Manga</button>
-                        <span id="matched-count">0 matched series</span>
+                <div class="dashboard-grid">
+                    <!-- Recent Activity -->
+                    <div class="dashboard-panel">
+                        <div class="panel-header">
+                            <h3><i class="fas fa-history"></i> Recent Activity</h3>
+                            <div class="panel-controls">
+                                <input type="text" id="activity-search" placeholder="Search activity..." class="search-input">
+                                <button id="clear-activity" class="btn btn-small">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div id="activity-log" class="activity-list"></div>
                     </div>
-                    <div class="matched-manga-list" id="matched-manga-list">
-                        <!-- Matched manga will be displayed here -->
+
+                    <!-- Sync Log -->
+                    <div class="dashboard-panel">
+                        <div class="panel-header">
+                            <h3><i class="fas fa-terminal"></i> Sync Log</h3>
+                            <div class="panel-controls">
+                                <select id="log-filter">
+                                    <option value="all">All Levels</option>
+                                    <option value="error">Errors Only</option>
+                                    <option value="warn">Warnings+</option>
+                                    <option value="info">Info+</option>
+                                    <option value="debug">Debug+</option>
+                                </select>
+                                <button id="clear-logs" class="btn btn-small">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div id="logs-container" class="logs-container"></div>
+                    </div>
+
+                    <!-- API Debug -->
+                    <div class="dashboard-panel">
+                        <div class="panel-header">
+                            <h3><i class="fas fa-bug"></i> API Debug</h3>
+                        </div>
+                        <div class="api-debug-grid">
+                            <div class="api-section">
+                                <h4>Komga API Status</h4>
+                                <div class="api-status" id="komga-status">
+                                    <div class="status-indicator">
+                                        <span class="status-dot" id="komga-dot"></span>
+                                        <span class="status-text" id="komga-status-text">Checking...</span>
+                                        <button id="test-komga" class="btn btn-small">Test</button>
+                                        <button id="open-komga" class="btn btn-small btn-outline" title="Open Komga">
+                                            <i class="fas fa-external-link-alt"></i>
+                                        </button>
+                                    </div>
+                                    <div class="api-details" id="komga-details"></div>
+                                </div>
+                            </div>
+
+                            <div class="api-section">
+                                <h4>Suwayomi API Status</h4>
+                                <div class="api-status" id="suwa-status">
+                                    <div class="status-indicator">
+                                        <span class="status-dot" id="suwa-dot"></span>
+                                        <span class="status-text" id="suwa-status-text">Checking...</span>
+                                        <button id="test-suwa" class="btn btn-small">Test</button>
+                                        <button id="open-suwayomi" class="btn btn-small btn-outline" title="Open Suwayomi">
+                                            <i class="fas fa-external-link-alt"></i>
+                                        </button>
+                                    </div>
+                                    <div class="api-details" id="suwa-details"></div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -102,147 +180,82 @@
                 </div>
             </div>
 
-            <div id="management" class="tab-content">
-                <div class="management-grid">
-                    <!-- Configuration Section -->
-                    <div class="management-panel">
-                        <h3>Configuration</h3>
-                        <div class="config-section">
-                            <h4>Komga Configuration</h4>
-                            <form id="komga-config">
-                                <div class="form-group">
-                                    <label for="komga-base">Base URL:</label>
-                                    <input type="text" id="komga-base" name="komga-base">
-                                </div>
-                                <div class="form-group">
-                                    <label for="komga-user">Username:</label>
-                                    <input type="text" id="komga-user" name="komga-user">
-                                </div>
-                                <div class="form-group">
-                                    <label for="komga-pass">Password:</label>
-                                    <input type="password" id="komga-pass" name="komga-pass">
-                                </div>
-                                <button type="submit" class="btn btn-primary">Save Komga Config</button>
-                            </form>
-                        </div>
-
-                        <div class="config-section">
-                            <h4>Suwayomi Configuration</h4>
-                            <form id="suwa-config">
-                                <div class="form-group">
-                                    <label for="suwa-base">Base URL:</label>
-                                    <input type="text" id="suwa-base" name="suwa-base">
-                                </div>
-                                <div class="auth-method-selector">
-                                    <h5>Authentication Method:</h5>
-                                    <div class="auth-tabs">
-                                        <button type="button" class="auth-tab active" onclick="switchAuthMethod('token')">Bearer Token</button>
-                                        <button type="button" class="auth-tab" onclick="switchAuthMethod('basic')">Basic Auth</button>
-                                    </div>
-                                </div>
-                                <div id="token-auth" class="auth-fields">
-                                    <div class="form-group">
-                                        <label for="suwa-token">Token (optional):</label>
-                                        <input type="text" id="suwa-token" name="suwa-token">
-                                    </div>
-                                </div>
-                                <div id="basic-auth" class="auth-fields" style="display: none;">
-                                    <div class="form-group">
-                                        <label for="suwa-user">Username:</label>
-                                        <input type="text" id="suwa-user" name="suwa-user">
-                                    </div>
-                                    <div class="form-group">
-                                        <label for="suwa-pass">Password:</label>
-                                        <input type="password" id="suwa-pass" name="suwa-pass">
-                                    </div>
-                                </div>
-                                <button type="submit" class="btn btn-primary">Save Suwayomi Config</button>
-                            </form>
-                        </div>
-
-                        <div class="config-section">
-                            <h4>Sync Configuration</h4>
-                            <form id="sync-config">
-                                <div class="form-group">
-                                    <label for="sync-interval">Sync Interval (ms):</label>
-                                    <input type="number" id="sync-interval" name="sync-interval">
-                                </div>
-                                <div class="form-group">
-                                    <label for="fuzzy-threshold">Fuzzy Threshold:</label>
-                                    <input type="number" id="fuzzy-threshold" name="fuzzy-threshold" step="0.01" min="0" max="1">
-                                </div>
-                                <div class="form-group">
-                                    <label for="log-level">Log Level:</label>
-                                    <select id="log-level" name="log-level">
-                                        <option value="error">Error</option>
-                                        <option value="warn">Warn</option>
-                                        <option value="info">Info</option>
-                                        <option value="debug">Debug</option>
-                                    </select>
-                                </div>
-                                <div class="form-group">
-                                    <label for="dry-run">Dry Run Mode:</label>
-                                    <input type="checkbox" id="dry-run" name="dry-run">
-                                </div>
-                                <button type="submit" class="btn btn-primary">Save Sync Config</button>
-                            </form>
-                        </div>
+            <!-- Configuration Tab -->
+            <div id="configuration" class="tab-content">
+                <div class="config-grid">
+                    <!-- Komga Configuration -->
+                    <div class="config-section">
+                        <h3><i class="fas fa-server"></i> Komga Configuration</h3>
+                        <form id="komga-config">
+                            <div class="form-group">
+                                <label for="komga-base">Base URL:</label>
+                                <input type="text" id="komga-base" name="komga-base" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="komga-user">Username:</label>
+                                <input type="text" id="komga-user" name="komga-user" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="komga-pass">Password:</label>
+                                <input type="password" id="komga-pass" name="komga-pass" required>
+                            </div>
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-save"></i> Save Komga Config
+                            </button>
+                        </form>
                     </div>
 
-                    <!-- Logs Section -->
-                    <div class="management-panel">
-                        <h3>Logs</h3>
-                        <div class="logs-controls">
-                            <button id="clear-logs" class="btn btn-secondary">Clear Logs</button>
-                            <button id="download-logs" class="btn btn-secondary">Download Logs</button>
-                            <select id="log-filter">
-                                <option value="all">All Levels</option>
-                                <option value="error">Errors Only</option>
-                                <option value="warn">Warnings+</option>
-                                <option value="info">Info+</option>
-                                <option value="debug">Debug+</option>
-                            </select>
-                        </div>
-                        <div id="logs-container" class="logs-container"></div>
+                    <!-- Suwayomi Configuration -->
+                    <div class="config-section">
+                        <h3><i class="fas fa-mobile-alt"></i> Suwayomi Configuration</h3>
+                        <form id="suwa-config">
+                            <div class="form-group">
+                                <label for="suwa-base">Base URL:</label>
+                                <input type="text" id="suwa-base" name="suwa-base" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="suwa-user">Username:</label>
+                                <input type="text" id="suwa-user" name="suwa-user" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="suwa-pass">Password:</label>
+                                <input type="password" id="suwa-pass" name="suwa-pass" required>
+                            </div>
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-save"></i> Save Suwayomi Config
+                            </button>
+                        </form>
                     </div>
 
-                    <!-- API Debug Section -->
-                    <div class="management-panel">
-                        <h3>API Debug</h3>
-                        <div class="api-section">
-                            <h4>Komga API Status</h4>
-                            <div class="api-status" id="komga-status">
-                                <div class="status-indicator">
-                                    <span class="status-dot" id="komga-dot"></span>
-                                    <span class="status-text" id="komga-status-text">Checking...</span>
-                                </div>
-                                <button id="test-komga" class="btn btn-small">Test Connection</button>
+                    <!-- Sync Configuration -->
+                    <div class="config-section">
+                        <h3><i class="fas fa-sliders-h"></i> Sync Configuration</h3>
+                        <form id="sync-config">
+                            <div class="form-group">
+                                <label for="sync-interval">Sync Interval (ms):</label>
+                                <input type="number" id="sync-interval" name="sync-interval" min="10000" step="10000" required>
                             </div>
-                            <div class="api-details" id="komga-details"></div>
-                        </div>
-
-                        <div class="api-section">
-                            <h4>Suwayomi API Status</h4>
-                            <div class="api-status" id="suwa-status">
-                                <div class="status-indicator">
-                                    <span class="status-dot" id="suwa-dot"></span>
-                                    <span class="status-text" id="suwa-status-text">Checking...</span>
-                                </div>
-                                <button id="test-suwa" class="btn btn-small">Test Connection</button>
+                            <div class="form-group">
+                                <label for="fuzzy-threshold">Fuzzy Threshold:</label>
+                                <input type="number" id="fuzzy-threshold" name="fuzzy-threshold" step="0.01" min="0" max="1" required>
                             </div>
-                            <div class="api-details" id="suwa-details"></div>
-                        </div>
-
-                        <div class="api-section">
-                            <h4>Quick API Tests</h4>
-                            <div class="quick-tests">
-                                <button id="test-komga-series" class="btn btn-small">Test Komga Series</button>
-                                <button id="test-suwa-library" class="btn btn-small">Test Suwayomi Library</button>
-                                <button id="test-mapping-count" class="btn btn-small">Test Mapping Count</button>
-                                <button id="get-schema-info" class="btn btn-small">Get GraphQL Schema</button>
+                            <div class="form-group">
+                                <label for="log-level">Log Level:</label>
+                                <select id="log-level" name="log-level">
+                                    <option value="error">Error</option>
+                                    <option value="warn">Warn</option>
+                                    <option value="info">Info</option>
+                                    <option value="debug">Debug</option>
+                                </select>
                             </div>
-                            <div class="api-response" id="api-response"></div>
-                        </div>
+                            <div class="form-group">
+                                <label for="dry-run">Dry Run Mode:</label>
+                                <input type="checkbox" id="dry-run" name="dry-run">
+                            </div>
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-save"></i> Save Sync Config
+                            </button>
+                        </form>
                     </div>
                 </div>
             </div>
