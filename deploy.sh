@@ -97,11 +97,12 @@ check_dependencies() {
     fi
 
     # Check Docker
-    if ! command -v docker &> /dev/null; then
+    # Check Docker
+    if ! command -v docker &> /dev/null || ! docker --version &> /dev/null; then
         log_warning "Docker is not installed"
         if [ -f "/etc/os-release" ]; then
-            read -p "Would you like to install Docker automatically? (y/N): " -n 1 -r
-            echo
+            echo "Would you like to install Docker automatically? (y/N): "
+            read -r REPLY
             if [ "$REPLY" = "y" ] || [ "$REPLY" = "Y" ]; then
                 install_docker
             else
@@ -116,18 +117,32 @@ check_dependencies() {
 
     # Check Docker Compose (try both versions)
     if ! command -v docker-compose &> /dev/null && ! docker compose version &> /dev/null; then
-        log_error "Docker Compose is not installed or not in PATH"
-        exit 1
+        log_warning "Docker Compose is not available, trying to install..."
+        if command -v apt &> /dev/null; then
+            apt update && apt install -y docker-compose || true
+        elif command -v yum &> /dev/null; then
+            yum install -y docker-compose || true
+        fi
+
+        # Check again
+        if ! command -v docker-compose &> /dev/null && ! docker compose version &> /dev/null; then
+            log_error "Docker Compose is not installed or not in PATH"
+            log_info "Please install Docker Compose manually or use 'docker compose' (Docker CLI plugin)"
+            exit 1
+        fi
     fi
 
     # Check if Docker is running
     if ! docker info &> /dev/null; then
-        log_error "Docker daemon is not running"
-        log_info "Starting Docker service..."
-        systemctl start docker
-        sleep 2
+        log_warning "Docker daemon is not running, attempting to start..."
+        systemctl start docker 2>/dev/null || service docker start 2>/dev/null || true
+        sleep 3
         if ! docker info &> /dev/null; then
             log_error "Failed to start Docker daemon"
+            log_info "Please start Docker manually:"
+            log_info "  systemctl start docker"
+            log_info "  or"
+            log_info "  service docker start"
             exit 1
         fi
     fi
