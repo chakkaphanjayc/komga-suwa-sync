@@ -207,8 +207,8 @@ class WebDashboard {
                 pass: process.env.SUWA_PASS ? '********' : ''
             },
             sync: {
-                interval: process.env.SYNC_INTERVAL_MS || '15000',
-                fullSyncInterval: process.env.FULL_SYNC_INTERVAL_MS || '1800000',
+                interval: process.env.SYNC_INTERVAL_MS || '3600000', // 1 hour default (full sync only)
+                fullSyncInterval: process.env.FULL_SYNC_INTERVAL_MS || '3600000', // 1 hour default
                 threshold: process.env.FUZZY_THRESHOLD || '0.8',
                 level: process.env.LOG_LEVEL || 'info',
                 dryRun: process.env.SYNC_DRY_RUN || 'false',
@@ -308,8 +308,8 @@ class WebDashboard {
             }
             else if (type === 'sync') {
                 // Provide defaults for empty sync values
-                this.updateEnvLine(lines, 'SYNC_INTERVAL_MS', config['sync-interval'] || '15000');
-                this.updateEnvLine(lines, 'FULL_SYNC_INTERVAL_MS', config['full-sync-interval'] || '1800000');
+                this.updateEnvLine(lines, 'SYNC_INTERVAL_MS', config['sync-interval'] || '3600000'); // 1 hour default
+                this.updateEnvLine(lines, 'FULL_SYNC_INTERVAL_MS', config['full-sync-interval'] || '3600000'); // 1 hour default
                 this.updateEnvLine(lines, 'FUZZY_THRESHOLD', config['fuzzy-threshold'] || '0.8');
                 this.updateEnvLine(lines, 'LOG_LEVEL', config['log-level'] || 'info');
                 this.updateEnvLine(lines, 'SYNC_DIRECTION', config['sync-direction'] || 'bidirectional');
@@ -796,7 +796,7 @@ class WebDashboard {
             this.io.emit('sync-status', {
                 isRunning: this.isRunning,
                 lastSync: this.lastSyncTime.toISOString(),
-                intervalMs: this.isRunning ? parseInt(process.env.SYNC_INTERVAL_MS || process.env.EVENT_SYNC_INTERVAL_MS || '30000') : null,
+                intervalMs: this.isRunning ? parseInt(process.env.FULL_SYNC_INTERVAL_MS || '3600000') : null,
                 direction: process.env.SYNC_DIRECTION || 'bidirectional'
             });
             this.io.emit('activity', {
@@ -825,16 +825,15 @@ class WebDashboard {
     }
     async manualEventSync(req, res) {
         try {
-            logger_1.logger.info('Starting manual event-based sync triggered by user');
-            // Emit to WebSocket that manual event sync is starting
+            logger_1.logger.info('Starting manual full sync triggered by user');
+            // Emit to WebSocket that manual full sync is starting
             this.io.emit('activity', {
-                message: 'Manual event-based sync started by user',
+                message: 'Manual full sync started by user',
                 type: 'system'
             });
-            // Run event-based sync
+            // Run full sync instead of event-based sync
             await this.optimizedSyncService.sync({
-                mode: 'event-based',
-                maxHoursForRecent: parseInt(process.env.RECENT_READ_HOURS || '24'),
+                mode: 'full',
                 direction: process.env.SYNC_DIRECTION || 'bidirectional'
             });
             // Get updated stats
@@ -855,25 +854,25 @@ class WebDashboard {
             this.io.emit('sync-status', {
                 isRunning: this.isRunning,
                 lastSync: this.lastSyncTime.toISOString(),
-                intervalMs: this.isRunning ? parseInt(process.env.SYNC_INTERVAL_MS || process.env.EVENT_SYNC_INTERVAL_MS || '30000') : null,
+                intervalMs: this.isRunning ? parseInt(process.env.FULL_SYNC_INTERVAL_MS || '3600000') : null,
                 direction: process.env.SYNC_DIRECTION || 'bidirectional'
             });
             this.io.emit('activity', {
-                message: 'Manual event-based sync completed successfully',
+                message: 'Manual full sync completed successfully',
                 type: 'sync'
             });
-            logger_1.logger.info('Manual event-based sync completed successfully');
+            logger_1.logger.info('Manual full sync completed successfully');
             res.json({
                 success: true,
-                message: 'Manual event-based sync completed',
+                message: 'Manual full sync completed',
                 stats: this.stats
             });
         }
         catch (error) {
-            logger_1.logger.error(error, 'Manual event-based sync failed');
+            logger_1.logger.error(error, 'Manual full sync failed');
             this.stats.errors++;
             this.io.emit('activity', {
-                message: `Manual event-based sync failed: ${error.message}`,
+                message: `Manual full sync failed: ${error.message}`,
                 type: 'error'
             });
             res.status(500).json({
@@ -1111,42 +1110,8 @@ class WebDashboard {
             throw new Error('Sync is already running');
         }
         this.isRunning = true;
-        // Prefer SYNC_INTERVAL_MS (saved via web UI) but fall back to EVENT_SYNC_INTERVAL_MS for legacy
-        const eventBasedInterval = parseInt(process.env.SYNC_INTERVAL_MS || process.env.EVENT_SYNC_INTERVAL_MS || '15000'); // 15 seconds default (more frequent with optimization)
-        const fullSyncInterval = parseInt(process.env.FULL_SYNC_INTERVAL_MS || '1800000'); // 30 minutes default (more frequent with optimization)
-        // Start frequent event-based sync for recently read manga
-        this.syncInterval = setInterval(async () => {
-            try {
-                await this.optimizedSyncService.sync({
-                    mode: 'event-based',
-                    maxHoursForRecent: parseInt(process.env.RECENT_READ_HOURS || '24'),
-                    direction: process.env.SYNC_DIRECTION || 'bidirectional'
-                });
-                this.stats.syncCycles++;
-                this.lastSyncTime = new Date();
-                this.io.emit('stats-update', this.stats);
-                this.io.emit('sync-status', {
-                    isRunning: true,
-                    lastSync: this.lastSyncTime.toISOString(),
-                    mode: 'event-based',
-                    intervalMs: eventBasedInterval,
-                    direction: process.env.SYNC_DIRECTION || 'bidirectional'
-                });
-                this.io.emit('activity', {
-                    message: 'Event-based sync cycle completed successfully',
-                    type: 'sync'
-                });
-            }
-            catch (error) {
-                this.stats.errors++;
-                logger_1.logger.error(error, 'Event-based sync cycle failed');
-                this.io.emit('activity', {
-                    message: `Event-based sync cycle failed: ${error instanceof Error ? error.message : String(error)}`,
-                    type: 'error'
-                });
-            }
-        }, eventBasedInterval);
-        // Start periodic full library sync
+        const fullSyncInterval = parseInt(process.env.FULL_SYNC_INTERVAL_MS || '3600000'); // 1 hour default (less frequent to reduce CPU)
+        // Start periodic full library sync only (no event-based sync)
         this.fullSyncInterval = setInterval(async () => {
             try {
                 await this.optimizedSyncService.sync({
@@ -1160,7 +1125,7 @@ class WebDashboard {
                     isRunning: true,
                     lastFullSync: this.lastFullSyncTime.toISOString(),
                     mode: 'full',
-                    intervalMs: eventBasedInterval,
+                    intervalMs: fullSyncInterval,
                     direction: process.env.SYNC_DIRECTION || 'bidirectional'
                 });
                 this.io.emit('activity', {
@@ -1181,14 +1146,14 @@ class WebDashboard {
             isRunning: true,
             lastSync: this.lastSyncTime ? this.lastSyncTime.toISOString() : null,
             lastFullSync: this.lastFullSyncTime ? this.lastFullSyncTime.toISOString() : null,
-            intervalMs: eventBasedInterval,
+            intervalMs: fullSyncInterval,
             direction: process.env.SYNC_DIRECTION || 'bidirectional'
         });
         this.io.emit('activity', {
-            message: 'Optimized sync service started (event-based + periodic full sync + event listener) with caching and rate limiting',
+            message: 'Full sync service started (periodic full sync only) with caching and rate limiting',
             type: 'system'
         });
-        logger_1.logger.info({ eventBasedInterval, fullSyncInterval }, 'Optimized sync service started');
+        logger_1.logger.info({ fullSyncInterval }, 'Full sync service started (no event-based sync)');
     }
     stopSync() {
         if (this.syncInterval) {
@@ -1199,8 +1164,6 @@ class WebDashboard {
             clearInterval(this.fullSyncInterval);
             this.fullSyncInterval = null;
         }
-        // Stop the event listener
-        this.eventListener.stop();
         this.isRunning = false;
         this.io.emit('sync-status', {
             isRunning: false,
@@ -1210,10 +1173,10 @@ class WebDashboard {
             direction: process.env.SYNC_DIRECTION || 'bidirectional'
         });
         this.io.emit('activity', {
-            message: 'Optimized sync service and event listener stopped',
+            message: 'Full sync service stopped',
             type: 'system'
         });
-        logger_1.logger.info('Optimized sync service and event listener stopped');
+        logger_1.logger.info('Full sync service stopped');
     }
     async runMatch() {
         try {
@@ -1479,9 +1442,6 @@ class WebDashboard {
                     // Start the sync service
                     await this.startSync();
                     logger_1.logger.info('Auto-start completed successfully - sync service is now running');
-                    // Start the event listener for real-time event detection
-                    this.eventListener.start();
-                    logger_1.logger.info('Event listener started for real-time sync detection');
                 }
                 catch (matchError) {
                     logger_1.logger.error(matchError, 'Initial matching failed during auto-start');
