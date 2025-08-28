@@ -1,6 +1,17 @@
 // Komga-Suwayomi Sync Dashboard JavaScript
 // This is a JavaScript file - not TypeScript
 
+// Polyfill for crypto.randomUUID if not available
+if (!crypto.randomUUID) {
+    crypto.randomUUID = function() {
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+            const r = Math.random() * 16 | 0;
+            const v = c === 'x' ? r : (r & 0x3 | 0x8);
+            return v.toString(16);
+        });
+    };
+}
+
 class SyncDashboard {
     constructor() {
         this.socket = null;
@@ -115,26 +126,38 @@ class SyncDashboard {
             this.saveConfig('sync');
         });
 
-        // Control buttons
-        document.getElementById('start-sync').addEventListener('click', () => {
-            this.sendCommand('start-sync');
-        });
+        // Control buttons - only add listeners if elements exist
+        const startSyncBtn = document.getElementById('start-sync');
+        const stopSyncBtn = document.getElementById('stop-sync');
+        const runMatchBtn = document.getElementById('run-match');
+        const testConnectionsBtn = document.getElementById('test-connections');
+        const refreshMatchedBtn = document.getElementById('refresh-matched');
 
-        document.getElementById('stop-sync').addEventListener('click', () => {
-            this.sendCommand('stop-sync');
-        });
-
-        document.getElementById('run-match').addEventListener('click', () => {
-            this.sendCommand('run-match');
-        });
-
-        document.getElementById('test-connections').addEventListener('click', () => {
-            this.testConnections();
-        });
-
-        document.getElementById('refresh-matched').addEventListener('click', () => {
-            this.loadMatchedManga();
-        });
+        if (startSyncBtn) {
+            startSyncBtn.addEventListener('click', () => {
+                this.sendCommand('start-sync');
+            });
+        }
+        if (stopSyncBtn) {
+            stopSyncBtn.addEventListener('click', () => {
+                this.sendCommand('stop-sync');
+            });
+        }
+        if (runMatchBtn) {
+            runMatchBtn.addEventListener('click', () => {
+                this.sendCommand('run-match');
+            });
+        }
+        if (testConnectionsBtn) {
+            testConnectionsBtn.addEventListener('click', () => {
+                this.testConnections();
+            });
+        }
+        if (refreshMatchedBtn) {
+            refreshMatchedBtn.addEventListener('click', () => {
+                this.loadMatchedManga();
+            });
+        }
 
         // Logs controls
         document.getElementById('clear-logs').addEventListener('click', () => {
@@ -149,14 +172,32 @@ class SyncDashboard {
             this.filterLogs(e.target.value);
         });
 
-        // API Debug buttons
-        document.getElementById('test-komga').addEventListener('click', () => {
-            this.testAPI('komga');
-        });
+        // API Debug buttons - only add listeners if elements exist
+        const testKomgaBtn = document.getElementById('test-komga');
+        const testSuwaBtn = document.getElementById('test-suwa');
+        const openKomgaBtn = document.getElementById('open-komga');
+        const openSuwayomiBtn = document.getElementById('open-suwayomi');
 
-        document.getElementById('test-suwa').addEventListener('click', () => {
-            this.testAPI('suwa');
-        });
+        if (testKomgaBtn) {
+            testKomgaBtn.addEventListener('click', () => {
+                this.testAPI('komga');
+            });
+        }
+        if (testSuwaBtn) {
+            testSuwaBtn.addEventListener('click', () => {
+                this.testAPI('suwa');
+            });
+        }
+        if (openKomgaBtn) {
+            openKomgaBtn.addEventListener('click', () => {
+                this.openKomgaUrl();
+            });
+        }
+        if (openSuwayomiBtn) {
+            openSuwayomiBtn.addEventListener('click', () => {
+                this.openSuwayomiUrl();
+            });
+        }
 
         // Search functionality
         const activitySearch = document.getElementById('activity-search');

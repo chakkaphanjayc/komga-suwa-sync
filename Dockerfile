@@ -32,6 +32,9 @@ COPY --from=build /app/dist ./dist
 COPY --from=build /app/public ./public
 COPY --from=build /app/package*.json ./
 
+# Create data directory and set permissions
+RUN mkdir -p /app/data && chown -R appuser:appuser /app
+
 # Change ownership to non-root user
 RUN chown -R appuser:appuser /app
 USER appuser
