@@ -11,19 +11,25 @@ const http_1 = require("http");
 const path_1 = __importDefault(require("path"));
 const logger_1 = require("./utils/logger");
 const sync_1 = require("./core/sync");
+const enhancedSync_1 = require("./core/enhancedSync");
 const mappingRepo_1 = require("./core/mappingRepo");
 const komga_1 = require("./clients/komga");
 const suwa_1 = require("./clients/suwa");
 const matcher_1 = require("./core/matcher");
+const eventListener_1 = require("./core/eventListener");
 const normalize_1 = require("./utils/normalize");
 class WebDashboard {
     constructor() {
         this.isRunning = false;
         this.syncInterval = null;
+        this.fullSyncInterval = null;
+        this.lastSyncTime = null;
+        this.lastFullSyncTime = null;
         this.stats = {
             seriesMappings: 0,
             chapterMappings: 0,
             syncCycles: 0,
+            fullSyncCycles: 0,
             errors: 0
         };
         this.app = (0, express_1.default)();
@@ -34,6 +40,15 @@ class WebDashboard {
         this.suwaClient = new suwa_1.SuwaClient(this.mappingRepo);
         this.matcher = new matcher_1.Matcher();
         this.syncService = new sync_1.SyncService(this.komgaClient, this.suwaClient, this.mappingRepo, this.matcher);
+        this.enhancedSyncService = new enhancedSync_1.EnhancedSyncService(this.komgaClient, this.suwaClient, this.mappingRepo, this.matcher);
+        this.eventListener = new eventListener_1.EventListener({
+            komgaClient: this.komgaClient,
+            suwaClient: this.suwaClient,
+            mappingRepo: this.mappingRepo,
+            enhancedSyncService: this.enhancedSyncService,
+            eventCheckInterval: parseInt(process.env.EVENT_CHECK_INTERVAL_MS || '10000'),
+            recentWindowHours: parseInt(process.env.RECENT_READ_HOURS || '1')
+        });
         this.setupMiddleware();
         this.setupRoutes();
         this.setupWebSocket();
@@ -73,9 +88,15 @@ class WebDashboard {
         this.app.get('/debug-ids', this.debugIds.bind(this));
         this.app.get('/debug-sync-log', this.getSyncLog.bind(this));
         this.app.post('/manual-sync', this.manualSync.bind(this));
-        this.app.post('/clear-sync-log', this.clearSyncLog.bind(this));
+        this.app.post('/manual-event-sync', this.manualEventSync.bind(this));
+        this.app.post('/manual-full-sync', this.manualFullSync.bind(this));
+        this.app.post('/manual-sync-komga-to-suwa', this.manualSyncKomgaToSuwa.bind(this));
+        this.app.post('/manual-sync-suwa-to-komga', this.manualSyncSuwaToKomga.bind(this));
         this.app.post('/api/sync-komga-progress', this.syncKomgaProgress.bind(this));
         this.app.post('/api/sync-suwa-progress', this.syncSuwaProgress.bind(this));
+        this.app.get('/api/event-listener/status', this.getEventListenerStatus.bind(this));
+        this.app.post('/api/event-listener/start', this.startEventListener.bind(this));
+        this.app.post('/api/event-listener/stop', this.stopEventListener.bind(this));
         this.app.get('/api/manga/komga', this.getKomgaManga.bind(this));
         this.app.get('/api/manga/suwayomi', this.getSuwayomiManga.bind(this));
         this.app.get('/api/komga/series/:seriesId/books', this.getKomgaBooks.bind(this));
@@ -89,7 +110,10 @@ class WebDashboard {
             socket.emit('stats-update', this.stats);
             socket.emit('sync-status', {
                 isRunning: this.isRunning,
-                lastSync: new Date().toISOString()
+                lastSync: this.lastSyncTime ? this.lastSyncTime.toISOString() : null,
+                lastFullSync: this.lastFullSyncTime ? this.lastFullSyncTime.toISOString() : null,
+                intervalMs: this.isRunning ? parseInt(process.env.SYNC_INTERVAL_MS || process.env.EVENT_SYNC_INTERVAL_MS || '30000') : null,
+                direction: process.env.SYNC_DIRECTION || 'bidirectional'
             });
             socket.on('command', (data) => {
                 this.handleCommand({ body: data }, {
@@ -123,6 +147,7 @@ class WebDashboard {
                 seriesMappings: seriesCount,
                 chapterMappings: chapterCount,
                 syncCycles: this.stats.syncCycles,
+                fullSyncCycles: this.stats.fullSyncCycles || 0,
                 errors: this.stats.errors
             };
             res.json(this.stats);
@@ -180,10 +205,12 @@ class WebDashboard {
                 pass: process.env.SUWA_PASS ? '********' : ''
             },
             sync: {
-                interval: process.env.SYNC_INTERVAL_MS,
-                threshold: process.env.FUZZY_THRESHOLD,
-                level: process.env.LOG_LEVEL,
-                dryRun: process.env.SYNC_DRY_RUN
+                interval: process.env.SYNC_INTERVAL_MS || '30000',
+                fullSyncInterval: process.env.FULL_SYNC_INTERVAL_MS || '21600000',
+                threshold: process.env.FUZZY_THRESHOLD || '0.8',
+                level: process.env.LOG_LEVEL || 'info',
+                dryRun: process.env.SYNC_DRY_RUN || 'false',
+                direction: process.env.SYNC_DIRECTION || 'bidirectional'
             }
         });
     }
@@ -213,10 +240,14 @@ class WebDashboard {
             else if (type === 'sync') {
                 if (config['sync-interval'])
                     process.env.SYNC_INTERVAL_MS = config['sync-interval'];
+                if (config['full-sync-interval'])
+                    process.env.FULL_SYNC_INTERVAL_MS = config['full-sync-interval'];
                 if (config['fuzzy-threshold'])
                     process.env.FUZZY_THRESHOLD = config['fuzzy-threshold'];
                 if (config['log-level'])
                     process.env.LOG_LEVEL = config['log-level'];
+                if (config['sync-direction'])
+                    process.env.SYNC_DIRECTION = config['sync-direction'];
                 process.env.SYNC_DRY_RUN = config['dry-run'] ? 'true' : 'false';
             }
             // Try to update .env file for persistence
@@ -274,10 +305,13 @@ class WebDashboard {
                 this.updateEnvLine(lines, 'SUWA_PASS', config['suwa-pass']);
             }
             else if (type === 'sync') {
-                this.updateEnvLine(lines, 'SYNC_INTERVAL_MS', config['sync-interval']);
-                this.updateEnvLine(lines, 'FUZZY_THRESHOLD', config['fuzzy-threshold']);
-                this.updateEnvLine(lines, 'LOG_LEVEL', config['log-level']);
-                this.updateEnvLine(lines, 'SYNC_DRY_RUN', config['dry-run'] ? 'true' : 'false');
+                // Provide defaults for empty sync values
+                this.updateEnvLine(lines, 'SYNC_INTERVAL_MS', config['sync-interval'] || '30000');
+                this.updateEnvLine(lines, 'FULL_SYNC_INTERVAL_MS', config['full-sync-interval'] || '21600000');
+                this.updateEnvLine(lines, 'FUZZY_THRESHOLD', config['fuzzy-threshold'] || '0.8');
+                this.updateEnvLine(lines, 'LOG_LEVEL', config['log-level'] || 'info');
+                this.updateEnvLine(lines, 'SYNC_DIRECTION', config['sync-direction'] || 'bidirectional');
+                this.updateEnvLine(lines, 'SYNC_DRY_RUN', config['dry-run'] !== undefined ? (config['dry-run'] ? 'true' : 'false') : 'false');
             }
             fs.writeFileSync(envPath, lines.join('\n'));
         }
@@ -736,8 +770,11 @@ class WebDashboard {
                 message: 'Manual sync started by user',
                 type: 'system'
             });
-            // Run the sync
-            await this.syncService.sync();
+            // Run the enhanced sync
+            await this.enhancedSyncService.sync({
+                mode: 'full',
+                direction: process.env.SYNC_DIRECTION || 'bidirectional'
+            });
             // Get updated stats
             const [seriesCount, chapterCount] = await Promise.all([
                 this.mappingRepo.getSeriesMappingCount(),
@@ -749,8 +786,15 @@ class WebDashboard {
                 syncCycles: this.stats.syncCycles + 1,
                 errors: this.stats.errors
             };
+            this.lastSyncTime = new Date();
             // Emit updated stats and completion message
             this.io.emit('stats-update', this.stats);
+            this.io.emit('sync-status', {
+                isRunning: this.isRunning,
+                lastSync: this.lastSyncTime.toISOString(),
+                intervalMs: this.isRunning ? parseInt(process.env.SYNC_INTERVAL_MS || process.env.EVENT_SYNC_INTERVAL_MS || '30000') : null,
+                direction: process.env.SYNC_DIRECTION || 'bidirectional'
+            });
             this.io.emit('activity', {
                 message: 'Manual sync completed successfully',
                 type: 'sync'
@@ -775,73 +819,230 @@ class WebDashboard {
             });
         }
     }
-    async clearSyncLog(req, res) {
+    async manualEventSync(req, res) {
         try {
-            logger_1.logger.info('Clearing sync log');
-            // Clear sync timestamps from chapter mappings
-            await this.mappingRepo.clearSyncTimestamps();
-            // Emit to WebSocket
+            logger_1.logger.info('Starting manual event-based sync triggered by user');
+            // Emit to WebSocket that manual event sync is starting
             this.io.emit('activity', {
-                message: 'Sync log cleared by user',
+                message: 'Manual event-based sync started by user',
                 type: 'system'
             });
-            logger_1.logger.info('Sync log cleared successfully');
+            // Run event-based sync
+            await this.enhancedSyncService.sync({
+                mode: 'event-based',
+                maxHoursForRecent: parseInt(process.env.RECENT_READ_HOURS || '24'),
+                direction: process.env.SYNC_DIRECTION || 'bidirectional'
+            });
+            // Get updated stats
+            const [seriesCount, chapterCount] = await Promise.all([
+                this.mappingRepo.getSeriesMappingCount(),
+                this.mappingRepo.getChapterMappingCount()
+            ]);
+            this.stats = {
+                seriesMappings: seriesCount,
+                chapterMappings: chapterCount,
+                syncCycles: this.stats.syncCycles + 1,
+                fullSyncCycles: this.stats.fullSyncCycles || 0,
+                errors: this.stats.errors
+            };
+            this.lastSyncTime = new Date();
+            // Emit updated stats and completion message
+            this.io.emit('stats-update', this.stats);
+            this.io.emit('sync-status', {
+                isRunning: this.isRunning,
+                lastSync: this.lastSyncTime.toISOString(),
+                intervalMs: this.isRunning ? parseInt(process.env.SYNC_INTERVAL_MS || process.env.EVENT_SYNC_INTERVAL_MS || '30000') : null,
+                direction: process.env.SYNC_DIRECTION || 'bidirectional'
+            });
+            this.io.emit('activity', {
+                message: 'Manual event-based sync completed successfully',
+                type: 'sync'
+            });
+            logger_1.logger.info('Manual event-based sync completed successfully');
             res.json({
                 success: true,
-                message: 'Sync log cleared successfully'
+                message: 'Manual event-based sync completed',
+                stats: this.stats
             });
         }
         catch (error) {
-            logger_1.logger.error(error, 'Failed to clear sync log');
+            logger_1.logger.error(error, 'Manual event-based sync failed');
+            this.stats.errors++;
+            this.io.emit('activity', {
+                message: `Manual event-based sync failed: ${error.message}`,
+                type: 'error'
+            });
             res.status(500).json({
                 success: false,
                 error: error.message
             });
         }
     }
-    async testConnectionsAndSync(req, res) {
+    async manualFullSync(req, res) {
         try {
-            // Test connections first
-            const komgaResult = await this.testKomgaConnection();
-            const suwaResult = await this.testSuwaConnection();
-            if (!komgaResult.success || !suwaResult.success) {
-                return res.status(400).json({
-                    success: false,
-                    error: 'Connection tests failed',
-                    komga: komgaResult,
-                    suwayomi: suwaResult
-                });
-            }
-            // If both connections work, start the sync
-            await this.startSync();
+            logger_1.logger.info('Starting manual full library sync triggered by user');
+            // Emit to WebSocket that manual full sync is starting
+            this.io.emit('activity', {
+                message: 'Manual full library sync started by user',
+                type: 'system'
+            });
+            // Run full library sync
+            await this.enhancedSyncService.sync({
+                mode: 'full',
+                direction: process.env.SYNC_DIRECTION || 'bidirectional'
+            });
+            // Get updated stats
+            const [seriesCount, chapterCount] = await Promise.all([
+                this.mappingRepo.getSeriesMappingCount(),
+                this.mappingRepo.getChapterMappingCount()
+            ]);
+            this.stats = {
+                seriesMappings: seriesCount,
+                chapterMappings: chapterCount,
+                syncCycles: this.stats.syncCycles,
+                fullSyncCycles: (this.stats.fullSyncCycles || 0) + 1,
+                errors: this.stats.errors
+            };
+            // Emit updated stats and completion message
+            this.io.emit('stats-update', this.stats);
+            this.io.emit('activity', {
+                message: 'Manual full library sync completed successfully',
+                type: 'sync'
+            });
+            logger_1.logger.info('Manual full library sync completed successfully');
             res.json({
                 success: true,
-                message: 'Connections tested successfully and sync started',
-                komga: komgaResult,
-                suwayomi: suwaResult
+                message: 'Manual full library sync completed',
+                stats: this.stats
             });
         }
         catch (error) {
-            logger_1.logger.error(error, 'Failed to test connections and start sync');
-            res.status(500).json({ error: error.message });
+            logger_1.logger.error(error, 'Manual full library sync failed');
+            this.stats.errors++;
+            this.io.emit('activity', {
+                message: `Manual full library sync failed: ${error.message}`,
+                type: 'error'
+            });
+            res.status(500).json({
+                success: false,
+                error: error.message
+            });
         }
     }
-    async testKomgaConnection() {
+    async manualSyncSuwaToKomga(req, res) {
         try {
-            const series = await this.komgaClient.getSeries();
-            return { success: true, data: { count: series.length } };
+            logger_1.logger.info('Starting manual Suwayomi to Komga sync triggered by user');
+            // Emit to WebSocket that manual directional sync is starting
+            this.io.emit('activity', {
+                message: 'Manual Suwayomi to Komga sync started by user',
+                type: 'system'
+            });
+            // Run directional sync
+            await this.enhancedSyncService.sync({
+                mode: 'full',
+                direction: 'suwa-to-komga'
+            });
+            // Get updated stats
+            const [seriesCount, chapterCount] = await Promise.all([
+                this.mappingRepo.getSeriesMappingCount(),
+                this.mappingRepo.getChapterMappingCount()
+            ]);
+            this.stats = {
+                seriesMappings: seriesCount,
+                chapterMappings: chapterCount,
+                syncCycles: this.stats.syncCycles + 1,
+                fullSyncCycles: this.stats.fullSyncCycles || 0,
+                errors: this.stats.errors
+            };
+            this.lastSyncTime = new Date();
+            // Emit updated stats and completion message
+            this.io.emit('stats-update', this.stats);
+            this.io.emit('sync-status', {
+                isRunning: this.isRunning,
+                lastSync: this.lastSyncTime.toISOString(),
+                intervalMs: this.isRunning ? parseInt(process.env.SYNC_INTERVAL_MS || process.env.EVENT_SYNC_INTERVAL_MS || '30000') : null,
+                direction: process.env.SYNC_DIRECTION || 'bidirectional'
+            });
+            this.io.emit('activity', {
+                message: 'Manual Suwayomi to Komga sync completed successfully',
+                type: 'sync'
+            });
+            logger_1.logger.info('Manual Suwayomi to Komga sync completed successfully');
+            res.json({
+                success: true,
+                message: 'Manual Suwayomi to Komga sync completed',
+                stats: this.stats
+            });
         }
         catch (error) {
-            return { success: false, error: error.message };
+            logger_1.logger.error(error, 'Manual Suwayomi to Komga sync failed');
+            this.stats.errors++;
+            this.io.emit('activity', {
+                message: `Manual Suwayomi to Komga sync failed: ${error.message}`,
+                type: 'error'
+            });
+            res.status(500).json({
+                success: false,
+                error: error.message
+            });
         }
     }
-    async testSuwaConnection() {
+    async manualSyncKomgaToSuwa(req, res) {
         try {
-            const library = await this.suwaClient.getLibrary();
-            return { success: true, data: { count: library.length } };
+            logger_1.logger.info('Starting manual Komga to Suwayomi sync triggered by user');
+            // Emit to WebSocket that manual directional sync is starting
+            this.io.emit('activity', {
+                message: 'Manual Komga to Suwayomi sync started by user',
+                type: 'system'
+            });
+            // Run directional sync
+            await this.enhancedSyncService.sync({
+                mode: 'full',
+                direction: 'komga-to-suwa'
+            });
+            // Get updated stats
+            const [seriesCount, chapterCount] = await Promise.all([
+                this.mappingRepo.getSeriesMappingCount(),
+                this.mappingRepo.getChapterMappingCount()
+            ]);
+            this.stats = {
+                seriesMappings: seriesCount,
+                chapterMappings: chapterCount,
+                syncCycles: this.stats.syncCycles + 1,
+                fullSyncCycles: this.stats.fullSyncCycles || 0,
+                errors: this.stats.errors
+            };
+            this.lastSyncTime = new Date();
+            // Emit updated stats and completion message
+            this.io.emit('stats-update', this.stats);
+            this.io.emit('sync-status', {
+                isRunning: this.isRunning,
+                lastSync: this.lastSyncTime.toISOString(),
+                intervalMs: this.isRunning ? parseInt(process.env.SYNC_INTERVAL_MS || process.env.EVENT_SYNC_INTERVAL_MS || '30000') : null,
+                direction: process.env.SYNC_DIRECTION || 'bidirectional'
+            });
+            this.io.emit('activity', {
+                message: 'Manual Komga to Suwayomi sync completed successfully',
+                type: 'sync'
+            });
+            logger_1.logger.info('Manual Komga to Suwayomi sync completed successfully');
+            res.json({
+                success: true,
+                message: 'Manual Komga to Suwayomi sync completed',
+                stats: this.stats
+            });
         }
         catch (error) {
-            return { success: false, error: error.message };
+            logger_1.logger.error(error, 'Manual Komga to Suwayomi sync failed');
+            this.stats.errors++;
+            this.io.emit('activity', {
+                message: `Manual Komga to Suwayomi sync failed: ${error.message}`,
+                type: 'error'
+            });
+            res.status(500).json({
+                success: false,
+                error: error.message
+            });
         }
     }
     async handleCommand(req, res) {
@@ -856,6 +1057,40 @@ class WebDashboard {
                     break;
                 case 'run-match':
                     await this.runMatch();
+                    break;
+                case 'start-event-listener':
+                    this.eventListener.start();
+                    this.io.emit('activity', {
+                        message: 'Event listener started via WebSocket',
+                        type: 'system'
+                    });
+                    break;
+                case 'stop-event-listener':
+                    this.eventListener.stop();
+                    this.io.emit('activity', {
+                        message: 'Event listener stopped via WebSocket',
+                        type: 'system'
+                    });
+                    break;
+                case 'sync-komga-to-suwa':
+                    await this.enhancedSyncService.sync({
+                        mode: 'full',
+                        direction: 'komga-to-suwa'
+                    });
+                    this.io.emit('activity', {
+                        message: 'Komga to Suwayomi sync completed via WebSocket',
+                        type: 'sync'
+                    });
+                    break;
+                case 'sync-suwa-to-komga':
+                    await this.enhancedSyncService.sync({
+                        mode: 'full',
+                        direction: 'suwa-to-komga'
+                    });
+                    this.io.emit('activity', {
+                        message: 'Suwayomi to Komga sync completed via WebSocket',
+                        type: 'sync'
+                    });
                     break;
                 default:
                     throw new Error(`Unknown command: ${command}`);
@@ -872,55 +1107,109 @@ class WebDashboard {
             throw new Error('Sync is already running');
         }
         this.isRunning = true;
-        const interval = parseInt(process.env.SYNC_INTERVAL_MS || '60000');
+        // Prefer SYNC_INTERVAL_MS (saved via web UI) but fall back to EVENT_SYNC_INTERVAL_MS for legacy
+        const eventBasedInterval = parseInt(process.env.SYNC_INTERVAL_MS || process.env.EVENT_SYNC_INTERVAL_MS || '30000'); // 30 seconds default
+        const fullSyncInterval = parseInt(process.env.FULL_SYNC_INTERVAL_MS || '21600000'); // 6 hours default
+        // Start frequent event-based sync for recently read manga
         this.syncInterval = setInterval(async () => {
             try {
-                await this.syncService.sync();
+                await this.enhancedSyncService.sync({
+                    mode: 'event-based',
+                    maxHoursForRecent: parseInt(process.env.RECENT_READ_HOURS || '24'),
+                    direction: process.env.SYNC_DIRECTION || 'bidirectional'
+                });
                 this.stats.syncCycles++;
+                this.lastSyncTime = new Date();
                 this.io.emit('stats-update', this.stats);
                 this.io.emit('sync-status', {
                     isRunning: true,
-                    lastSync: new Date().toISOString()
+                    lastSync: this.lastSyncTime.toISOString(),
+                    mode: 'event-based',
+                    intervalMs: eventBasedInterval,
+                    direction: process.env.SYNC_DIRECTION || 'bidirectional'
                 });
                 this.io.emit('activity', {
-                    message: 'Sync cycle completed successfully',
+                    message: 'Event-based sync cycle completed successfully',
                     type: 'sync'
                 });
             }
             catch (error) {
                 this.stats.errors++;
-                logger_1.logger.error(error, 'Sync cycle failed');
+                logger_1.logger.error(error, 'Event-based sync cycle failed');
                 this.io.emit('activity', {
-                    message: `Sync cycle failed: ${error instanceof Error ? error.message : String(error)}`,
+                    message: `Event-based sync cycle failed: ${error instanceof Error ? error.message : String(error)}`,
                     type: 'error'
                 });
             }
-        }, interval);
+        }, eventBasedInterval);
+        // Start periodic full library sync
+        this.fullSyncInterval = setInterval(async () => {
+            try {
+                await this.enhancedSyncService.sync({
+                    mode: 'full',
+                    direction: process.env.SYNC_DIRECTION || 'bidirectional'
+                });
+                this.stats.fullSyncCycles++;
+                this.lastFullSyncTime = new Date();
+                this.io.emit('stats-update', this.stats);
+                this.io.emit('sync-status', {
+                    isRunning: true,
+                    lastFullSync: this.lastFullSyncTime.toISOString(),
+                    mode: 'full',
+                    intervalMs: eventBasedInterval,
+                    direction: process.env.SYNC_DIRECTION || 'bidirectional'
+                });
+                this.io.emit('activity', {
+                    message: 'Full library sync completed successfully',
+                    type: 'sync'
+                });
+            }
+            catch (error) {
+                this.stats.errors++;
+                logger_1.logger.error(error, 'Full sync cycle failed');
+                this.io.emit('activity', {
+                    message: `Full sync cycle failed: ${error instanceof Error ? error.message : String(error)}`,
+                    type: 'error'
+                });
+            }
+        }, fullSyncInterval);
         this.io.emit('sync-status', {
             isRunning: true,
-            lastSync: new Date().toISOString()
+            lastSync: this.lastSyncTime ? this.lastSyncTime.toISOString() : null,
+            lastFullSync: this.lastFullSyncTime ? this.lastFullSyncTime.toISOString() : null,
+            intervalMs: eventBasedInterval,
+            direction: process.env.SYNC_DIRECTION || 'bidirectional'
         });
         this.io.emit('activity', {
-            message: 'Sync service started',
+            message: 'Enhanced sync service started (event-based + periodic full sync + event listener)',
             type: 'system'
         });
-        logger_1.logger.info('Sync service started');
+        logger_1.logger.info({ eventBasedInterval, fullSyncInterval }, 'Enhanced sync service started');
     }
     stopSync() {
         if (this.syncInterval) {
             clearInterval(this.syncInterval);
             this.syncInterval = null;
         }
+        if (this.fullSyncInterval) {
+            clearInterval(this.fullSyncInterval);
+            this.fullSyncInterval = null;
+        }
+        // Stop the event listener
+        this.eventListener.stop();
         this.isRunning = false;
         this.io.emit('sync-status', {
             isRunning: false,
-            lastSync: new Date().toISOString()
+            lastSync: this.lastSyncTime ? this.lastSyncTime.toISOString() : null,
+            lastFullSync: this.lastFullSyncTime ? this.lastFullSyncTime.toISOString() : null,
+            intervalMs: null,
+            direction: process.env.SYNC_DIRECTION || 'bidirectional'
         });
         this.io.emit('activity', {
-            message: 'Sync service stopped',
+            message: 'Enhanced sync service and event listener stopped',
             type: 'system'
         });
-        logger_1.logger.info('Sync service stopped');
+        logger_1.logger.info('Enhanced sync service and event listener stopped');
     }
     async runMatch() {
         try {
@@ -1092,6 +1381,44 @@ class WebDashboard {
             res.status(500).json({ error: error.message });
         }
     }
+    getEventListenerStatus(req, res) {
+        try {
+            const status = this.eventListener.getStatus();
+            res.json(status);
+        }
+        catch (error) {
+            logger_1.logger.error(error, 'Failed to get event listener status');
+            res.status(500).json({ error: error.message });
+        }
+    }
+    startEventListener(req, res) {
+        try {
+            this.eventListener.start();
+            this.io.emit('activity', {
+                message: 'Event listener started',
+                type: 'system'
+            });
+            res.json({ success: true, message: 'Event listener started' });
+        }
+        catch (error) {
+            logger_1.logger.error(error, 'Failed to start event listener');
+            res.status(500).json({ error: error.message });
+        }
+    }
+    stopEventListener(req, res) {
+        try {
+            this.eventListener.stop();
+            this.io.emit('activity', {
+                message: 'Event listener stopped',
+                type: 'system'
+            });
+            res.json({ success: true, message: 'Event listener stopped' });
+        }
+        catch (error) {
+            logger_1.logger.error(error, 'Failed to stop event listener');
+            res.status(500).json({ error: error.message });
+        }
+    }
     start(port = 3000) {
         this.server.listen(port, () => {
             logger_1.logger.info(`Web dashboard listening on port ${port}`);
@@ -1121,7 +1448,76 @@ class WebDashboard {
             catch (err) {
                 logger_1.logger.warn(err, 'Failed to enumerate routes');
             }
+            // Auto-start sync if configuration is valid
+            this.autoStartSync();
         });
+    }
+    async autoStartSync() {
+        try {
+            logger_1.logger.info('Checking configuration for auto-start...');
+            // Check if basic configuration is present
+            const hasKomgaConfig = process.env.KOMGA_BASE && process.env.KOMGA_USER && process.env.KOMGA_PASS;
+            const hasSuwaConfig = process.env.SUWA_BASE && (process.env.SUWA_TOKEN || (process.env.SUWA_USER && process.env.SUWA_PASS));
+            if (!hasKomgaConfig || !hasSuwaConfig) {
+                logger_1.logger.info('Auto-start skipped: Missing configuration. Please configure both Komga and Suwayomi in the web interface.');
+                return;
+            }
+            logger_1.logger.info('Configuration found, testing connections...');
+            // Test connections
+            const komgaConnected = await this.testKomgaConnection();
+            const suwaConnected = await this.testSuwaConnection();
+            if (komgaConnected && suwaConnected) {
+                logger_1.logger.info('Both connections successful, starting initial match and sync...');
+                // Run initial matching
+                try {
+                    await this.syncService.matchAndMap();
+                    logger_1.logger.info('Initial matching completed successfully');
+                    // Start the sync service
+                    await this.startSync();
+                    logger_1.logger.info('Auto-start completed successfully - sync service is now running');
+                    // Start the event listener for real-time event detection
+                    this.eventListener.start();
+                    logger_1.logger.info('Event listener started for real-time sync detection');
+                }
+                catch (matchError) {
+                    logger_1.logger.error(matchError, 'Initial matching failed during auto-start');
+                    logger_1.logger.info('Auto-start partially successful - connections work but matching failed. Please run initial match manually.');
+                }
+            }
+            else {
+                logger_1.logger.info('Auto-start skipped: Connection tests failed. Please check your configuration.');
+                if (!komgaConnected) {
+                    logger_1.logger.info('Komga connection failed - please verify Komga URL, username, and password');
+                }
+                if (!suwaConnected) {
+                    logger_1.logger.info('Suwayomi connection failed - please verify Suwayomi URL and authentication');
+                }
+            }
+        }
+        catch (error) {
+            logger_1.logger.error(error, 'Auto-start failed');
+            logger_1.logger.info('Auto-start failed. Please check your configuration and try again manually.');
+        }
+    }
+    async testKomgaConnection() {
+        try {
+            await this.komgaClient.getSeries();
+            return true;
+        }
+        catch (error) {
+            logger_1.logger.debug({ error: error.message }, 'Komga connection test failed');
+            return false;
+        }
+    }
+    async testSuwaConnection() {
+        try {
+            await this.suwaClient.getLibrary();
+            return true;
+        }
+        catch (error) {
+            logger_1.logger.debug({ error: error.message }, 'Suwayomi connection test failed');
+            return false;
+        }
     }
 }
 // Enhanced logging to send to WebSocket

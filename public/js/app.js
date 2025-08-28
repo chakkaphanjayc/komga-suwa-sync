@@ -20,10 +20,11 @@ class SyncDashboard {
         this.setupEventListeners();
         this.loadInitialData();
         this.startStatusUpdates();
-        this.loadConfiguration();
+        this.loadConfig();
         this.applyTheme();
         this.showTab(this.currentTab);
         this.startAutoSync();
+        this.updateSyncDirectionFromConfig();
     }
 
     connectWebSocket() {
@@ -43,17 +44,25 @@ class SyncDashboard {
             this.handleLog(data);
         });
 
-        this.socket.on('sync-status', (data) => {
-            this.updateSyncStatus(data);
-        });
-
         this.socket.on('stats-update', (data) => {
             this.updateStats(data);
+        });
+
+        this.socket.on('sync-status', (data) => {
+            this.updateSyncStatus(data);
+            // Update sync direction if provided in the data
+            if (data.direction) {
+                this.updateSyncDirectionStatus(data.direction);
+            }
+            // Countdown timer is now handled in updateSyncStatus
         });
 
         this.socket.on('activity', (data) => {
             this.addActivity(data);
         });
+
+        // Update sync direction after WebSocket connection is established
+        this.updateSyncDirectionFromConfig();
     }
 
     setupEventListeners() {
@@ -121,10 +130,6 @@ class SyncDashboard {
 
         document.getElementById('test-connections').addEventListener('click', () => {
             this.testConnections();
-        });
-
-        document.getElementById('test-connections-and-sync').addEventListener('click', () => {
-            this.testConnectionsAndSync();
         });
 
         document.getElementById('refresh-matched').addEventListener('click', () => {
@@ -247,6 +252,7 @@ class SyncDashboard {
         // Load tab-specific data
         if (tabId === 'configuration') {
             this.loadConfig();
+            this.updateSyncDirectionFromConfig();
             this.checkAPIStatus();
         } else if (tabId === 'mappings') {
             this.loadMappings();
@@ -260,9 +266,13 @@ class SyncDashboard {
 
     async loadInitialData() {
         try {
-            const response = await fetch('/api/stats');
-            const stats = await response.json();
+            // Load stats first
+            const statsResponse = await fetch('/api/stats');
+            const stats = await statsResponse.json();
             this.updateStats(stats);
+
+            // Update sync direction status on initial load
+            this.updateSyncDirectionFromConfig();
         } catch (error) {
             console.error('Failed to load initial data:', error);
         }
@@ -287,10 +297,56 @@ class SyncDashboard {
         const lastSyncText = document.querySelector('#last-sync .status-text');
         if (data.lastSync) {
             lastSyncText.textContent = new Date(data.lastSync).toLocaleString();
+        } else if (data.lastFullSync) {
+            // If no regular sync but we have a full sync time, show that
+            lastSyncText.textContent = `Full: ${new Date(data.lastFullSync).toLocaleString()}`;
+        } else {
+            lastSyncText.textContent = 'Never';
         }
 
         if (data.isRunning !== undefined) {
             this.updateStatus(data.isRunning ? 'Running' : 'Stopped', data.isRunning ? 'connected' : 'error');
+        }
+
+        // Calculate remaining time based on last sync and interval
+        if (data.isRunning && data.intervalMs && data.lastSync) {
+            const lastSyncTime = new Date(data.lastSync).getTime();
+            const now = Date.now();
+            const elapsed = now - lastSyncTime;
+            const remaining = Math.max(0, data.intervalMs - elapsed);
+
+            if (remaining > 0) {
+                this.startCountdownTimer(remaining);
+            } else {
+                // If already past the interval, show syncing
+                const countdownElement = document.getElementById('sync-countdown');
+                if (countdownElement) {
+                    countdownElement.textContent = 'Syncing...';
+                }
+            }
+        } else if (!data.isRunning) {
+            // Clear countdown if sync stopped
+            if (this.countdownInterval) {
+                clearInterval(this.countdownInterval);
+                this.countdownInterval = null;
+                const countdownElement = document.getElementById('sync-countdown');
+                if (countdownElement) {
+                    countdownElement.textContent = '';
+                }
+            }
+        }
+    }
+
+    updateSyncDirectionStatus(direction) {
+        const directionText = document.getElementById('sync-direction-text');
+        if (directionText) {
+            let displayText = 'Bidirectional';
+            if (direction === 'komga-to-suwa') {
+                displayText = 'Komga → Suwayomi';
+            } else if (direction === 'suwa-to-komga') {
+                displayText = 'Suwayomi → Komga';
+            }
+            directionText.textContent = displayText;
         }
     }
 
@@ -442,67 +498,68 @@ class SyncDashboard {
     }
 
     // Load configuration from env file
-    async loadConfiguration() {
+    async loadConfig() {
         try {
             const response = await fetch('/api/config');
             const config = await response.json();
 
-            // Populate form fields with saved configuration
-            this.populateConfigForms(config);
-            this.showNotification('Configuration loaded from environment', 'success');
-        } catch (error) {
-            console.error('Load configuration error:', error);
-            this.showNotification('Failed to load saved configuration', 'error');
-        }
-    }
-
-    populateConfigForms(config) {
-        // Populate Komga config
-        if (config.komga) {
-            Object.keys(config.komga).forEach(key => {
-                const element = document.getElementById(`komga-${key}`);
-                if (element) {
-                    element.value = config.komga[key];
-                }
-            });
-        }
-
-        // Populate Suwayomi config
-        if (config.suwa) {
-            Object.keys(config.suwa).forEach(key => {
-                const element = document.getElementById(`suwa-${key}`);
-                if (element) {
-                    element.value = config.suwa[key];
-                }
-            });
-        }
-
-        // Populate sync config
-        if (config.sync) {
-            // Map server config keys to HTML form field names
-            const syncFieldMapping = {
-                interval: 'sync-interval',
-                threshold: 'fuzzy-threshold',
-                level: 'log-level',
-                dryRun: 'dry-run'
-            };
-
-            Object.keys(config.sync).forEach(key => {
-                const fieldName = syncFieldMapping[key] || `sync-${key}`;
-                const element = document.getElementById(fieldName);
-                if (element) {
-                    if (element.type === 'checkbox') {
-                        element.checked = config.sync[key] === 'true' || config.sync[key] === true;
-                    } else {
-                        element.value = config.sync[key];
+            // Populate form fields
+            Object.keys(config).forEach(section => {
+                Object.keys(config[section]).forEach(key => {
+                    // Map server config keys to HTML form field names
+                    let fieldName;
+                    if (section === 'komga') {
+                        fieldName = `komga-${key}`;
+                    } else if (section === 'suwa') {
+                        fieldName = `suwa-${key}`;
+                    } else if (section === 'sync') {
+                        const syncFieldMapping = {
+                            interval: 'sync-interval',
+                            fullSyncInterval: 'full-sync-interval',
+                            threshold: 'fuzzy-threshold',
+                            level: 'log-level',
+                            dryRun: 'dry-run',
+                            direction: 'sync-direction'
+                        };
+                        fieldName = syncFieldMapping[key] || `sync-${key}`;
                     }
-                }
+
+                    const element = document.getElementById(fieldName);
+                    if (element) {
+                        // Ensure input attributes reflect displayed units
+                        if (fieldName === 'sync-interval') {
+                            element.placeholder = element.placeholder || '30';
+                            element.min = 1;
+                            element.step = 1;
+                        } else if (fieldName === 'full-sync-interval') {
+                            element.placeholder = element.placeholder || '6';
+                            element.min = 1;
+                            element.step = 1;
+                        }
+                        // Convert stored ms values to user-friendly units for display
+                        if (section === 'sync' && key === 'interval') {
+                            // Event sync interval stored in ms, display in seconds
+                            const ms = parseInt(config[section][key] || '0', 10) || 0;
+                            element.value = ms > 0 ? String(Math.round(ms / 1000)) : '';
+                            // If value looks like milliseconds (very large) but user-facing units are seconds,
+                            // clamp or convert if necessary (defensive). Already converted above.
+                        } else if (section === 'sync' && key === 'fullSyncInterval') {
+                            // Full sync interval stored in ms, display in hours
+                            const ms = parseInt(config[section][key] || '0', 10) || 0;
+                            element.value = ms > 0 ? String(Math.round(ms / 3600000)) : '';
+                        } else if (element.type === 'checkbox') {
+                            element.checked = config[section][key] === 'true' || config[section][key] === true;
+                        } else {
+                            element.value = config[section][key] || '';
+                        }
+                    }
+                });
             });
 
-            // Start countdown timer if sync interval is set
-            if (config.sync.interval) {
-                this.startCountdownTimer(parseInt(config.sync.interval));
-            }
+            return config;
+        } catch (error) {
+            console.error('Load config error:', error);
+            return {};
         }
     }
 
@@ -555,6 +612,9 @@ class SyncDashboard {
         const config = {};
 
         for (let [key, value] of formData.entries()) {
+            // Skip empty values so we don't overwrite with blanks
+            if (value === '') continue;
+
             // Map HTML form field names back to server config keys
             let configKey = key;
             if (type === 'komga') {
@@ -562,15 +622,47 @@ class SyncDashboard {
             } else if (type === 'suwa') {
                 configKey = key.replace('suwa-', '');
             } else if (type === 'sync') {
-                // Map HTML field names back to server config keys
+                // Map HTML field names back to server config keys (keep dash-style keys expected by backend)
                 const reverseSyncFieldMapping = {
-                    'sync-interval': 'interval',
-                    'fuzzy-threshold': 'threshold',
-                    'log-level': 'level',
-                    'dry-run': 'dryRun'
+                    'sync-interval': 'sync-interval',
+                    'full-sync-interval': 'full-sync-interval',
+                    'fuzzy-threshold': 'fuzzy-threshold',
+                    'log-level': 'log-level',
+                    'dry-run': 'dry-run',
+                    'sync-direction': 'sync-direction'
                 };
                 configKey = reverseSyncFieldMapping[key] || key.replace('sync-', '');
+
+                // Validate numeric inputs before conversion
+                if (configKey === 'sync-interval') {
+                    // User provides seconds -> convert to ms
+                    const secs = parseFloat(value);
+                    if (Number.isNaN(secs) || secs <= 0) {
+                        this.showNotification('Event Sync Interval must be a positive number (seconds)', 'error');
+                        return;
+                    }
+                    config[configKey] = String(Math.round(secs * 1000));
+                    continue;
+                }
+
+                if (configKey === 'full-sync-interval') {
+                    // User provides hours -> convert to ms
+                    const hours = parseFloat(value);
+                    if (Number.isNaN(hours) || hours <= 0) {
+                        this.showNotification('Full Sync Interval must be a positive number (hours)', 'error');
+                        return;
+                    }
+                    config[configKey] = String(Math.round(hours * 3600000));
+                    continue;
+                }
+
+                if (configKey === 'dry-run') {
+                    // For checkboxes, FormData includes only checked boxes; but we handle explicit below. If present treat as true
+                    config[configKey] = true;
+                    continue;
+                }
             }
+
             config[configKey] = value;
         }
 
@@ -578,6 +670,14 @@ class SyncDashboard {
         if (type === 'suwa') {
             // Only basic auth is supported now
             config['token'] = '';
+        }
+
+        // Ensure dry-run checkbox is explicitly sent (false if unchecked)
+        if (type === 'sync') {
+            const dryRunEl = document.getElementById('dry-run');
+            if (dryRunEl) {
+                config['dry-run'] = (dryRunEl.checked === true) ? true : false;
+            }
         }
 
         try {
@@ -592,7 +692,8 @@ class SyncDashboard {
             if (response.ok) {
                 this.showNotification('Configuration saved successfully', 'success');
                 // Reload configuration to update forms
-                this.loadConfiguration();
+                await this.loadConfig();
+                this.updateSyncDirectionFromConfig();
             } else {
                 throw new Error('Failed to save configuration');
             }
@@ -602,46 +703,14 @@ class SyncDashboard {
         }
     }
 
-    async loadConfig() {
-        try {
-            const response = await fetch('/api/config');
-            const config = await response.json();
-
-            // Populate form fields
-            Object.keys(config).forEach(section => {
-                Object.keys(config[section]).forEach(key => {
-                    // Map server config keys to HTML form field names
-                    let fieldName;
-                    if (section === 'komga') {
-                        fieldName = `komga-${key}`;
-                    } else if (section === 'suwa') {
-                        fieldName = `suwa-${key}`;
-                    } else if (section === 'sync') {
-                        const syncFieldMapping = {
-                            interval: 'sync-interval',
-                            threshold: 'fuzzy-threshold',
-                            level: 'log-level',
-                            dryRun: 'dry-run'
-                        };
-                        fieldName = syncFieldMapping[key] || `sync-${key}`;
-                    }
-
-                    const element = document.getElementById(fieldName);
-                    if (element) {
-                        if (element.type === 'checkbox') {
-                            element.checked = config[section][key] === 'true';
-                        } else {
-                            element.value = config[section][key];
-                        }
-                    }
-                });
-            });
-
-            return config;
-        } catch (error) {
-            console.error('Load config error:', error);
-            return {};
-        }
+    // Update sync direction status when config is loaded
+    updateSyncDirectionFromConfig() {
+        this.loadConfig().then(config => {
+            const direction = config.sync && config.sync.direction ? config.sync.direction : 'bidirectional';
+            this.updateSyncDirectionStatus(direction);
+        }).catch(error => {
+            console.error('Error loading config for sync direction:', error);
+        });
     }
 
     sendCommand(command) {
@@ -735,7 +804,17 @@ class SyncDashboard {
         text.textContent = 'Testing...';
 
         try {
-            const response = await fetch(`/api/test-${api}`);
+            // Create a timeout promise that rejects after 10 seconds
+            const timeoutPromise = new Promise((_, reject) => {
+                setTimeout(() => reject(new Error('Request timeout')), 10000);
+            });
+
+            // Race the fetch request against the timeout
+            const response = await Promise.race([
+                fetch(`/api/test-${api}`),
+                timeoutPromise
+            ]);
+
             const result = await response.json();
 
             if (result.success) {
@@ -837,44 +916,6 @@ class SyncDashboard {
     switchAuthMethod(method) {
         // This method is deprecated - only basic auth is now supported for Suwayomi
         console.warn('switchAuthMethod is deprecated - only basic auth is supported');
-    }
-
-    async testConnectionsAndSync() {
-        this.showNotification('Testing connections and starting sync...', 'info');
-
-        try {
-            const response = await fetch('/api/test-connections-and-sync', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({})
-            });
-            const results = await response.json();
-
-            if (results.success) {
-                this.showNotification('Connections tested successfully and sync started!', 'success');
-                // Refresh matched manga after successful connection
-                this.loadMatchedManga();
-                // Start countdown timer
-                this.loadConfig().then(config => {
-                    if (config.sync && config.sync.interval) {
-                        this.startCountdownTimer(parseInt(config.sync.interval));
-                    }
-                });
-            } else {
-                let message = 'Connection test failed:\n';
-                if (results.komga && !results.komga.success) {
-                    message += `Komga: ${results.komga.error}\n`;
-                }
-                if (results.suwa && !results.suwa.success) {
-                    message += `Suwayomi: ${results.suwa.error}`;
-                }
-                this.showNotification(message, 'error');
-            }
-        } catch (error) {
-            this.showNotification('Connection test and sync failed', 'error');
-        }
     }
 
     async loadMatchedManga() {
@@ -1630,32 +1671,54 @@ class SyncDashboard {
             button.textContent = 'Syncing...';
         }
 
-        fetch('/manual-sync', { method: 'POST' })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    this.showSuccess('Manual sync completed successfully');
-                    this.loadSyncLog(); // Refresh the log
-                    // Start countdown timer
-                    this.loadConfig().then(config => {
+        this.showNotification('Starting manual sync...', 'info');
+
+        // Get the configured sync direction
+        this.loadConfig().then(config => {
+            const direction = config.sync && config.sync.direction ? config.sync.direction : 'bidirectional';
+            let endpoint = '/manual-sync';
+
+            // Choose the appropriate endpoint based on direction
+            if (direction === 'komga-to-suwa') {
+                endpoint = '/manual-sync-komga-to-suwa';
+            } else if (direction === 'suwa-to-komga') {
+                endpoint = '/manual-sync-suwa-to-komga';
+            }
+
+            fetch(endpoint, { method: 'POST' })
+                .then(response => response.json())
+                .then(async data => {
+                    if (data.success) {
+                        this.showSuccess('Manual sync completed successfully');
+                        this.loadSyncLog(); // Refresh the log
+                        // Refresh stats immediately
+                        await this.loadInitialData();
+                        // Start countdown timer
                         if (config.sync && config.sync.interval) {
                             this.startCountdownTimer(parseInt(config.sync.interval));
                         }
-                    });
-                } else {
-                    this.showError('Manual sync failed: ' + (data.error || 'Unknown error'));
-                }
-            })
-            .catch(error => {
-                console.error('Error triggering manual sync:', error);
-                this.showError('Failed to trigger manual sync');
-            })
-            .finally(() => {
-                if (button) {
-                    button.disabled = false;
-                    button.textContent = 'Trigger Manual Sync';
-                }
-            });
+                    } else {
+                        this.showError('Manual sync failed: ' + (data.error || 'Unknown error'));
+                    }
+                })
+                .catch(error => {
+                    console.error('Error triggering manual sync:', error);
+                    this.showError('Failed to trigger manual sync');
+                })
+                .finally(() => {
+                    if (button) {
+                        button.disabled = false;
+                        button.textContent = 'Trigger Manual Sync';
+                    }
+                });
+        }).catch(error => {
+            console.error('Error loading config for manual sync:', error);
+            this.showError('Failed to load configuration for manual sync');
+            if (button) {
+                button.disabled = false;
+                button.textContent = 'Trigger Manual Sync';
+            }
+        });
     }
 
     clearSyncLog() {
@@ -1686,14 +1749,14 @@ class SyncDashboard {
 
         this.showNotification('Syncing Komga progress to Suwayomi...', 'info');
 
-        // For now, trigger a full manual sync
-        // In the future, this could be enhanced to sync only in one direction
-        fetch('/manual-sync', { method: 'POST' })
+        fetch('/manual-sync-komga-to-suwa', { method: 'POST' })
             .then(response => response.json())
-            .then(data => {
+            .then(async data => {
                 if (data.success) {
                     this.showSuccess('Komga → Suwayomi sync completed successfully');
                     this.loadSyncLog(); // Refresh the log
+                    // Refresh stats immediately
+                    await this.loadInitialData();
                     // Start countdown timer
                     this.loadConfig().then(config => {
                         if (config.sync && config.sync.interval) {
@@ -1725,14 +1788,14 @@ class SyncDashboard {
 
         this.showNotification('Syncing Suwayomi progress to Komga...', 'info');
 
-        // For now, trigger a full manual sync
-        // In the future, this could be enhanced to sync only in one direction
-        fetch('/manual-sync', { method: 'POST' })
+        fetch('/manual-sync-suwa-to-komga', { method: 'POST' })
             .then(response => response.json())
-            .then(data => {
+            .then(async data => {
                 if (data.success) {
                     this.showSuccess('Suwayomi → Komga sync completed successfully');
                     this.loadSyncLog(); // Refresh the log
+                    // Refresh stats immediately
+                    await this.loadInitialData();
                     // Start countdown timer
                     this.loadConfig().then(config => {
                         if (config.sync && config.sync.interval) {

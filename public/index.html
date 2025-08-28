@@ -19,6 +19,7 @@
                     </button>
                     <div class="status-bar">
                         <span id="sync-status" class="status">Status: <span class="status-text">Unknown</span></span>
+                        <span id="sync-direction-status" class="status">Direction: <span class="status-text" id="sync-direction-text">Bidirectional</span></span>
                         <span id="last-sync" class="status">Last Sync: <span class="status-text">Never</span></span>
                         <span id="next-sync" class="status">Next Sync: <span class="status-text countdown" id="sync-countdown">--:--</span></span>
                     </div>
@@ -62,9 +63,6 @@
                 <div class="control-panel">
                     <h3><i class="fas fa-cogs"></i> Sync Controls</h3>
                     <div class="control-buttons">
-                        <button id="test-connections-and-sync" class="btn btn-primary">
-                            <i class="fas fa-play-circle"></i> Test & Start Sync
-                        </button>
                         <button id="start-sync" class="btn btn-success">
                             <i class="fas fa-play"></i> Start Sync
                         </button>
@@ -232,8 +230,22 @@
                         <h3><i class="fas fa-sliders-h"></i> Sync Configuration</h3>
                         <form id="sync-config">
                             <div class="form-group">
-                                <label for="sync-interval">Sync Interval (ms):</label>
-                                <input type="number" id="sync-interval" name="sync-interval" min="10000" step="10000" required>
+                                <label for="sync-interval">Event Sync Interval (sec):</label>
+                                <input type="number" id="sync-interval" name="sync-interval" min="1" step="1" placeholder="30" required>
+                                <small>Interval for checking recent reading activity (in seconds, default: 30s)</small>
+                            </div>
+                            <div class="form-group">
+                                <label for="full-sync-interval">Full Sync Interval (hour):</label>
+                                <input type="number" id="full-sync-interval" name="full-sync-interval" min="1" step="1" placeholder="6" required>
+                                <small>Interval for full library sync (in hours, default: 6 hours)</small>
+                            </div>
+                            <div class="form-group">
+                                <label for="sync-direction">Sync Direction:</label>
+                                <select id="sync-direction" name="sync-direction">
+                                    <option value="bidirectional">Bidirectional (Komga ↔ Suwayomi)</option>
+                                    <option value="komga-to-suwa">Komga → Suwayomi Only</option>
+                                    <option value="suwa-to-komga">Suwayomi → Komga Only</option>
+                                </select>
                             </div>
                             <div class="form-group">
                                 <label for="fuzzy-threshold">Fuzzy Threshold:</label>
