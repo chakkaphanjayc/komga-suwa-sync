@@ -77,8 +77,8 @@ class SyncService {
                     isRead: chapter.isRead,
                     lastReadAt: chapter.lastReadAt
                 }, 'Suwayomi chapter found and matched');
-                const shouldSync = progress.completed && (!chapter.isRead || !map.lastPushedKomga ||
-                    (chapter.lastReadAt && new Date(chapter.lastReadAt) < map.lastPushedKomga));
+                const shouldSync = (progress.completed || progress.page > 0) && (!chapter.isRead || chapter.lastPageRead !== progress.page ||
+                    !map.lastPushedKomga || (chapter.lastReadAt && new Date(chapter.lastReadAt) < map.lastPushedKomga));
                 logger_1.logger.info({
                     bookId: map.komgaBookId,
                     bookTitle: book.metadata?.title || book.name,
@@ -106,21 +106,23 @@ class SyncService {
                             lastReadAt: chapter.lastReadAt
                         }
                     }, 'Sending reading progress from Komga to Suwayomi');
-                    await this.suwa.setChapterRead(chapter.id, true);
+                    await this.suwa.setChapterProgress(chapter.id, progress.page || 0, progress.completed);
                     await this.repo.updateChapterMapLastPushedKomga(map.komgaBookId, new Date());
                     logger_1.logger.info({
                         bookId: map.komgaBookId,
                         chapterId: chapter.id,
                         chapterNum: chapter.chapterNumber,
-                        bookTitle: book.metadata?.title || book.name
-                    }, '✅ Successfully synced Komga completed chapter to Suwayomi');
+                        bookTitle: book.metadata?.title || book.name,
+                        page: progress.page || 0,
+                        completed: progress.completed
+                    }, '✅ Successfully synced Komga progress to Suwayomi');
                 }
                 else {
                     logger_1.logger.debug({
                         bookId: map.komgaBookId,
                         chapterId: chapter.id,
-                        reason: !progress.completed ? 'Not completed in Komga' :
-                            chapter.isRead ? 'Already read in Suwayomi' :
+                        reason: !progress.completed && progress.page === 0 ? 'No progress in Komga' :
+                            chapter.isRead && chapter.lastPageRead === progress.page ? 'Already synced' :
                                 'Recently synced'
                     }, 'Skipping sync - no action needed');
                 }
@@ -188,8 +190,8 @@ class SyncService {
                         readDate: progress.readDate
                     }
                 }, 'Komga reading progress retrieved for Suwayomi sync');
-                const shouldSync = chapter.isRead && (!progress.completed || !map.lastPushedSuwa ||
-                    (progress.readDate && new Date(progress.readDate) < map.lastPushedSuwa));
+                const shouldSync = (chapter.isRead || chapter.lastPageRead > 0) && (!progress.completed || progress.page !== chapter.lastPageRead ||
+                    !map.lastPushedSuwa || (progress.readDate && new Date(progress.readDate) < map.lastPushedSuwa));
                 logger_1.logger.info({
                     chapterId: chapter.id,
                     chapterNumber: chapter.chapterNumber,
@@ -219,22 +221,28 @@ class SyncService {
                             readDate: progress.readDate
                         }
                     }, 'Sending reading progress from Suwayomi to Komga');
-                    await this.komga.patchReadProgress(map.komgaBookId, progress.page || 0, true);
+                    // When marking as completed, use the total page count instead of 0
+                    const totalPages = book.media?.pagesCount || chapter.pageCount || 0;
+                    const pageToSend = chapter.isRead ? totalPages : (chapter.lastPageRead || 0);
+                    await this.komga.patchReadProgress(map.komgaBookId, pageToSend, chapter.isRead);
                     await this.repo.updateChapterMapLastPushedSuwa(chapter.id, new Date());
                     logger_1.logger.info({
                         chapterId: chapter.id,
                         bookId: map.komgaBookId,
                         chapterNum: chapter.chapterNumber,
                         chapterTitle: chapter.name,
-                        bookTitle: book.metadata?.title || book.name
-                    }, '✅ Successfully synced Suwayomi read chapter to Komga');
+                        bookTitle: book.metadata?.title || book.name,
+                        pageSent: pageToSend,
+                        totalPages: totalPages,
+                        completed: chapter.isRead
+                    }, '✅ Successfully synced Suwayomi progress to Komga');
                 }
                 else {
                     logger_1.logger.debug({
                         chapterId: chapter.id,
                         bookId: map.komgaBookId,
-                        reason: !chapter.isRead ? 'Not read in Suwayomi' :
-                            progress.completed ? 'Already completed in Komga' :
+                        reason: !chapter.isRead && chapter.lastPageRead === 0 ? 'No progress in Suwayomi' :
+                            progress.completed && progress.page === chapter.lastPageRead ? 'Already synced' :
                                 'Recently synced'
                     }, 'Skipping sync - no action needed');
                 }

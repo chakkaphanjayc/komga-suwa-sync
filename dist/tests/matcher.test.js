@@ -13,7 +13,10 @@ describe('Matcher', () => {
         expect(matcher.matchSeries('One Piece', 'Naruto')).toBe(false);
     });
     test('chapter match', () => {
-        expect(matcher.matchChapter(1.0, 1.0)).toBe(true);
-        expect(matcher.matchChapter(1.0, 1.002)).toBe(false);
+        const komgaBook = { metadata: { number: 1.0, title: 'Chapter 1' } };
+        const suwaChapter = { chapterNumber: 1.0, name: 'Chapter 1' };
+        expect(matcher.matchChapter(komgaBook, suwaChapter)).toBe(true);
+        const suwaChapterDifferent = { chapterNumber: 2.0, name: 'Special Episode' };
+        expect(matcher.matchChapter(komgaBook, suwaChapterDifferent)).toBe(false);
     });
 });
