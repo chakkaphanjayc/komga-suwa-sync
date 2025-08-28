@@ -64,9 +64,9 @@ simple_deploy() {
 
     log_success "Deployment completed!"
     echo ""
-    echo "🌐 Access your application at: http://localhost:3000"
-    echo "📋 View logs: docker compose logs -f"
-    echo "🛑 Stop service: docker compose down"
+    echo "Access your application at: http://localhost:3000"
+    echo "View logs: docker compose logs -f"
+    echo "Stop service: docker compose down"
 }
 
 # Show help
@@ -108,8 +108,8 @@ main() {
             ;;
     esac
 
-    echo "🚀 Komga-Suwayomi Sync - Simple Deployment"
-    echo "=========================================="
+    echo "Komga-Suwayomi Sync - Simple Deployment"
+    echo "======================================="
     echo "Environment: $env"
     echo ""
 

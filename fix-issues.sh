@@ -53,7 +53,9 @@ check_docker() {
     if ! docker info &> /dev/null; then
         log_error "Docker daemon is not running"
         echo ""
-        echo "Please start Docker Desktop and try again"
+        echo "Please start Docker:"
+        echo "• On Linux: sudo systemctl start docker"
+        echo "• On Windows/Mac: Start Docker Desktop"
         exit 1
     fi
 
