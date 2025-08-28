@@ -38,6 +38,21 @@ RUN apk update && apk upgrade && \
 RUN addgroup -g 1001 -S nodejs && \
     adduser -S komga-sync -u 1001
 
+# Create startup script to fix permissions
+RUN echo '#!/bin/sh' > /usr/local/bin/start.sh && \
+    echo 'echo "Fixing permissions..."' >> /usr/local/bin/start.sh && \
+    echo 'if [ -d "/app/data" ]; then' >> /usr/local/bin/start.sh && \
+    echo '  chown -R komga-sync:nodejs /app/data' >> /usr/local/bin/start.sh && \
+    echo '  chmod -R 755 /app/data' >> /usr/local/bin/start.sh && \
+    echo 'fi' >> /usr/local/bin/start.sh && \
+    echo 'if [ -f "/app/.env" ]; then' >> /usr/local/bin/start.sh && \
+    echo '  chown komga-sync:nodejs /app/.env' >> /usr/local/bin/start.sh && \
+    echo '  chmod 644 /app/.env' >> /usr/local/bin/start.sh && \
+    echo 'fi' >> /usr/local/bin/start.sh && \
+    echo 'echo "Starting application..."' >> /usr/local/bin/start.sh && \
+    echo 'exec "$@"' >> /usr/local/bin/start.sh && \
+    chmod +x /usr/local/bin/start.sh
+
 # Set working directory
 WORKDIR /app
 
@@ -71,5 +86,5 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:3000/health || exit 1
 
-# Start the application
-CMD ["npm", "start"]
+# Start the application with permission fix
+CMD ["/usr/local/bin/start.sh", "npm", "start"]

@@ -10,7 +10,7 @@ services:
       - "3000"
     volumes:
       - komga-suwa-data:/app/data
-      - ./.env:/app/.env:ro
+      - ./.env:/app/.env
     environment:
       - NODE_ENV=production
     restart: unless-stopped

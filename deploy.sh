@@ -74,6 +74,21 @@ setup_environment() {
         mkdir -p data
         log_success "Created data directory"
     fi
+
+    # Fix permissions before deployment
+    log_info "Fixing file permissions..."
+    if [ -f "fix-permissions.sh" ]; then
+        chmod +x fix-permissions.sh
+        ./fix-permissions.sh
+        log_success "Permissions fixed"
+    else
+        # Manual permission fix
+        sudo chown -R 1001:1001 data/ 2>/dev/null || true
+        sudo chown 1001:1001 .env 2>/dev/null || true
+        chmod -R 755 data/ 2>/dev/null || true
+        chmod 644 .env 2>/dev/null || true
+        log_success "Basic permissions set"
+    fi
 }
 
 build_and_deploy() {

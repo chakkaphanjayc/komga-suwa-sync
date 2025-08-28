@@ -118,6 +118,27 @@ setup: ## Initial setup - copy env file and create directories
 	fi
 	@echo "🎉 Setup complete! Run 'make health-check' next."
 
+# Quick fix commands
+fix-permissions: ## Fix Docker permission issues
+	@echo "🔧 Fixing permissions..."
+	@if [ -f "fix-permissions.sh" ]; then \
+		chmod +x fix-permissions.sh; \
+		./fix-permissions.sh; \
+	else \
+		echo "❌ fix-permissions.sh not found"; \
+		exit 1; \
+	fi
+
+quick-fix: ## Quick fix and restart service
+	@echo "🔧 Quick fix and restart..."
+	@if [ -f "quick-fix.sh" ]; then \
+		chmod +x quick-fix.sh; \
+		./quick-fix.sh; \
+	else \
+		echo "❌ quick-fix.sh not found"; \
+		exit 1; \
+	fi
+
 # Quick start commands
 dev: ## Quick development start (build + up + logs)
 	@echo "🚀 Starting development environment..."
