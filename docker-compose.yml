@@ -1,18 +1,19 @@
+version: '3.8'
+
 services:
   komga-suwa-sync:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: komga-suwa-sync
-    env_file: .env
-    volumes:
-      - "sync-data:/app/data"
-      - ./public:/app/public:ro
     ports:
       - "3000:3000"
-    restart: unless-stopped
+    volumes:
+      - ./data:/app/data
+      - ./.env:/app/.env:ro
     environment:
       - NODE_ENV=production
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
       interval: 30s
@@ -20,12 +21,29 @@ services:
       retries: 3
       start_period: 40s
     networks:
-      - sync-network
+      - komga-suwa-network
+
+  # Optional: Nginx reverse proxy for production
+  # Uncomment and configure if you want to use nginx
+  # nginx:
+  #   image: nginx:alpine
+  #   container_name: komga-suwa-nginx
+  #   ports:
+  #     - "80:80"
+  #     - "443:443"  # For SSL
+  #   volumes:
+  #     - ./nginx.conf:/etc/nginx/nginx.conf:ro
+  #     - ./ssl:/etc/nginx/ssl:ro  # For SSL certificates
+  #   depends_on:
+  #     - komga-suwa-sync
+  #   restart: unless-stopped
+  #   networks:
+  #     - komga-suwa-network
 
 networks:
-  sync-network:
+  komga-suwa-network:
     driver: bridge
 
 volumes:
-  sync-data:
+  komga-suwa-data:
     driver: local

@@ -1,48 +1,75 @@
-FROM node:20-slim AS base
+# =================================================================
+# Multi-stage Dockerfile for Komga-Suwayomi Sync Service
+# =================================================================
+# This Dockerfile creates an optimized production image for Linux deployment
 
-# Install curl for health checks
-RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
+# Build stage - Compile TypeScript and install dependencies
+FROM node:20-alpine AS builder
 
+# Install security updates
+RUN apk update && apk upgrade && \
+    apk add --no-cache git
+
+# Set working directory
+WORKDIR /app
+
+# Copy package files for dependency installation
+COPY package*.json ./
+
+# Install all dependencies (including dev dependencies for building)
+RUN npm ci --only=production=false
+
+# Copy source code
+COPY src/ ./src/
+COPY tsconfig.json ./
+
+# Build TypeScript to JavaScript
+RUN npm run build
+
+# Production stage - Create minimal runtime image
+FROM node:20-alpine AS production
+
+# Install security updates and required packages
+RUN apk update && apk upgrade && \
+    apk add --no-cache curl && \
+    rm -rf /var/cache/apk/*
+
+# Create non-root user for security
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S komga-sync -u 1001
+
+# Set working directory
 WORKDIR /app
 
 # Copy package files
 COPY package*.json ./
 
-FROM base AS build
-
-# Install all dependencies (including dev dependencies for building)
-RUN npm ci --include=dev && npm cache clean --force
-
-# Copy source code
-COPY . .
-
-# Build the application
-RUN npm run build
-
-FROM base AS production
-
 # Install only production dependencies
-RUN npm ci --only=production && npm cache clean --force
+RUN npm ci --only=production && \
+    npm cache clean --force
 
-# Create non-root user
-RUN groupadd -r appuser && useradd -r -g appuser appuser
+# Copy built application from builder stage
+COPY --from=builder /app/dist ./dist
 
-# Copy built application
-COPY --from=build /app/dist ./dist
-COPY --from=build /app/public ./public
-COPY --from=build /app/package*.json ./
+# Copy public assets
+COPY public/ ./public/
 
-# Create data directory and set permissions
-RUN mkdir -p /app/data && chown -R appuser:appuser /app
+# Copy nginx configuration (for reference)
+COPY nginx.conf ./
 
-# Change ownership to non-root user
-RUN chown -R appuser:appuser /app
-USER appuser
+# Create data directory for SQLite database
+RUN mkdir -p /app/data && \
+    chown -R komga-sync:nodejs /app/data
 
+# Switch to non-root user
+USER komga-sync
+
+# Expose port
 EXPOSE 3000
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:3000/health || exit 1
 
+# Start the application
 CMD ["npm", "start"]

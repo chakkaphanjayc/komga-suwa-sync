@@ -1,78 +1,49 @@
-# =================================================================
-# Production Docker Compose Configuration
-# =================================================================
-# This configuration is optimized for production deployments
-# Use this instead of docker-compose.yml for production environments
+version: '3.8'
 
 services:
   komga-suwa-sync:
     build:
       context: .
       dockerfile: Dockerfile
-      target: production
-    container_name: komga-suwa-sync-prod
-    env_file: .env
+    container_name: komga-suwa-sync
+    expose:
+      - "3000"
     volumes:
-      - "sync-data:/app/data"
-      - ./public:/app/public:ro
-      # Optional: Mount logs directory for persistent logging
-      - ./logs:/app/logs
-    ports:
-      - "3000:3000"
-    restart: unless-stopped
+      - komga-suwa-data:/app/data
+      - ./.env:/app/.env:ro
     environment:
       - NODE_ENV=production
-      - LOG_LEVEL=info
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
-  # run as image user (do not override)
     networks:
-      - sync-network
-    # Production resource limits
-    deploy:
-      resources:
-        limits:
-          memory: 512M
-          cpus: '0.5'
-        reservations:
-          memory: 256M
-          cpus: '0.25'
-    # Production logging configuration
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
+      - komga-suwa-network
+    depends_on:
+      - nginx
 
-  # Optional: Reverse proxy for production
-  # nginx:
-  #   image: nginx:alpine
-  #   container_name: komga-suwa-sync-nginx
-  #   ports:
-  #     - "80:80"
-  #     - "443:443"
-  #   volumes:
-  #     - ./nginx.conf:/etc/nginx/nginx.conf:ro
-  #     - ./ssl:/etc/nginx/ssl:ro
-  #   depends_on:
-  #     - komga-suwa-sync
-  #   restart: unless-stopped
-  #   networks:
-  #     - sync-network
+  nginx:
+    image: nginx:alpine
+    container_name: komga-suwa-nginx
+    ports:
+      - "80:80"
+      - "443:443"  # For SSL (uncomment ssl configuration in nginx.conf)
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      # - ./ssl:/etc/nginx/ssl:ro  # Mount SSL certificates here
+    depends_on:
+      - komga-suwa-sync
+    restart: unless-stopped
+    networks:
+      - komga-suwa-network
 
 networks:
-  sync-network:
+  komga-suwa-network:
     driver: bridge
 
-# =================================================================
-# Production Volumes (Optional)
-# =================================================================
-# Uncomment and configure these for production data persistence
-
 volumes:
-  sync-data:
+  komga-suwa-data:
     driver: local
