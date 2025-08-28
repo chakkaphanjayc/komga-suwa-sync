@@ -8,10 +8,10 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
-RUN npm ci --only=production && npm cache clean --force
-
 FROM base AS build
+
+# Install all dependencies (including dev dependencies for building)
+RUN npm ci && npm cache clean --force
 
 # Copy source code
 COPY . .
@@ -20,6 +20,9 @@ COPY . .
 RUN npm run build
 
 FROM base AS production
+
+# Install only production dependencies
+RUN npm ci --only=production && npm cache clean --force
 
 # Create non-root user
 RUN groupadd -r appuser && useradd -r -g appuser appuser

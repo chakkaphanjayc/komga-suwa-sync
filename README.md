@@ -77,6 +77,24 @@ LOG_LEVEL=info                 # Logging level: error, warn, info, debug
 SYNC_DRY_RUN=false             # Set to true for testing without making changes
 ```
 
+## 📋 Environment Variables
+
+| Variable                 | Description                                        | Required   | Default       |
+| ------------------------ | -------------------------------------------------- | ---------- | ------------- |
+| `KOMGA_BASE`             | Komga server URL with port                         | Yes        | -             |
+| `KOMGA_USER`             | Komga username                                     | Yes        | -             |
+| `KOMGA_PASS`             | Komga password                                     | Yes        | -             |
+| `SUWA_BASE`              | Suwayomi server URL with port                      | Yes        | -             |
+| `SUWA_USER`              | Suwayomi username (basic auth)                     | Optional\* | -             |
+| `SUWA_PASS`              | Suwayomi password (basic auth)                     | Optional\* | -             |
+| `EVENT_SYNC_INTERVAL_MS` | Event-based sync interval (frequent updates)       | No         | 30000 (30s)   |
+| `FULL_SYNC_INTERVAL_MS`  | Full library sync interval (comprehensive updates) | No         | 21600000 (6h) |
+| `RECENT_READ_HOURS`      | Hours to look back for recently read manga         | No         | 24            |
+| `SYNC_INTERVAL_MS`       | Legacy sync interval (backward compatibility)      | No         | 60000 (1min)  |
+| `FUZZY_THRESHOLD`        | Fuzzy matching threshold (0-1)                     | No         | 0.85          |
+| `LOG_LEVEL`              | Logging level                                      | No         | info          |
+| `SYNC_DRY_RUN`           | Enable dry run mode                                | No         | false         |
+
 ### 3. Verify Your Configuration
 
 Before deploying, run the health check script to verify your setup:
@@ -110,26 +128,6 @@ docker-compose up --build -d
 ### 4. Access the Dashboard
 
 Open your browser and navigate to: **http://localhost:3000**
-
-## 📋 Environment Variables
-
-| Variable                 | Description                                        | Required   | Default       |
-| ------------------------ | -------------------------------------------------- | ---------- | ------------- |
-| `KOMGA_BASE`             | Komga server URL with port                         | Yes        | -             |
-| `KOMGA_USER`             | Komga username                                     | Yes        | -             |
-| `KOMGA_PASS`             | Komga password                                     | Yes        | -             |
-| `SUWA_BASE`              | Suwayomi server URL with port                      | Yes        | -             |
-| `SUWA_USER`              | Suwayomi username (basic auth)                     | Optional\* | -             |
-| `SUWA_PASS`              | Suwayomi password (basic auth)                     | Optional\* | -             |
-| `EVENT_SYNC_INTERVAL_MS` | Event-based sync interval (frequent updates)       | No         | 30000 (30s)   |
-| `FULL_SYNC_INTERVAL_MS`  | Full library sync interval (comprehensive updates) | No         | 21600000 (6h) |
-| `RECENT_READ_HOURS`      | Hours to look back for recently read manga         | No         | 24            |
-| `SYNC_INTERVAL_MS`       | Legacy sync interval (backward compatibility)      | No         | 60000 (1min)  |
-| `FUZZY_THRESHOLD`        | Fuzzy matching threshold (0-1)                     | No         | 0.85          |
-| `LOG_LEVEL`              | Logging level                                      | No         | info          |
-| `SYNC_DRY_RUN`           | Enable dry run mode                                | No         | false         |
-
-\*Either `SUWA_TOKEN` or both `SUWA_USER`/`SUWA_PASS` must be provided
 
 ## 🐳 Docker Commands
 
