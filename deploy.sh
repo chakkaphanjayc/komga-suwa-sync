@@ -58,16 +58,63 @@ show_help() {
     echo "  $0 development --skip-build  # Deploy dev without rebuilding"
 }
 
+install_docker() {
+    log_info "Installing Docker..."
+
+    # Update package list
+    apt update
+
+    # Install required packages
+    apt install -y apt-transport-https ca-certificates curl gnupg lsb-release
+
+    # Add Docker's official GPG key
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+
+    # Set up the stable repository
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+    # Install Docker Engine
+    apt update
+    apt install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+
+    # Start and enable Docker service
+    systemctl start docker
+    systemctl enable docker
+
+    # Add current user to docker group
+    usermod -aG docker root
+
+    log_success "Docker installed successfully"
+    log_info "Please log out and back in for group changes to take effect"
+}
+
 check_dependencies() {
     log_info "Checking dependencies..."
 
-    # Check Docker
-    if ! command -v docker &> /dev/null; then
-        log_error "Docker is not installed or not in PATH"
-        exit 1
+    # Check if we're on Linux and offer to install Docker
+    if [ ! -f "/etc/os-release" ]; then
+        log_warning "Non-Linux system detected. Please ensure Docker is installed manually."
     fi
 
-    # Check Docker Compose
+    # Check Docker
+    if ! command -v docker &> /dev/null; then
+        log_warning "Docker is not installed"
+        if [ -f "/etc/os-release" ]; then
+            read -p "Would you like to install Docker automatically? (y/N): " -n 1 -r
+            echo
+            if [ "$REPLY" = "y" ] || [ "$REPLY" = "Y" ]; then
+                install_docker
+            else
+                log_error "Docker is required for deployment"
+                exit 1
+            fi
+        else
+            log_error "Docker is not installed or not in PATH"
+            exit 1
+        fi
+    fi
+
+    # Check Docker Compose (try both versions)
     if ! command -v docker-compose &> /dev/null && ! docker compose version &> /dev/null; then
         log_error "Docker Compose is not installed or not in PATH"
         exit 1
@@ -76,7 +123,13 @@ check_dependencies() {
     # Check if Docker is running
     if ! docker info &> /dev/null; then
         log_error "Docker daemon is not running"
-        exit 1
+        log_info "Starting Docker service..."
+        systemctl start docker
+        sleep 2
+        if ! docker info &> /dev/null; then
+            log_error "Failed to start Docker daemon"
+            exit 1
+        fi
     fi
 
     log_success "Dependencies check passed"
@@ -209,7 +262,7 @@ show_deployment_info() {
 }
 
 # Parse arguments
-while [[ $# -gt 0 ]]; do
+while [ $# -gt 0 ]; do
     case $1 in
         development|dev)
             ENVIRONMENT="development"
