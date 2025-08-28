@@ -1,0 +1,66 @@
+version: "3.9"
+
+# =================================================================
+# Docker Compose Override Configuration
+# =================================================================
+# Copy this file to docker-compose.override.yml to customize your deployment
+# This file is ignored by git and won't be overwritten by updates
+
+services:
+  komga-suwa-sync:
+    # Uncomment to use a different port on the host
+    # ports:
+    #   - "8080:3000"
+
+    # Uncomment to add additional environment variables
+    # environment:
+    #   - LOG_LEVEL=debug
+    #   - SYNC_DRY_RUN=true
+
+    # Uncomment to mount additional volumes
+    # volumes:
+    #   - ./custom-config:/app/config:ro
+    #   - ./logs:/app/logs
+
+    # Uncomment to set resource limits
+    # deploy:
+    #   resources:
+    #     limits:
+    #       memory: 512M
+    #       cpus: '0.5'
+    #     reservations:
+    #       memory: 256M
+    #       cpus: '0.25'
+
+# =================================================================
+# Example: Using with external Komga and Suwayomi containers
+# =================================================================
+# Uncomment and modify if you want to run Komga and Suwayomi in the same compose file
+
+# services:
+#   komga:
+#     image: gotson/komga:latest
+#     container_name: komga-server
+#     volumes:
+#       - ./komga-data:/config
+#       - ./komga-library:/data
+#     ports:
+#       - "25600:25600"
+#     environment:
+#       - TZ=Europe/London
+#     restart: unless-stopped
+
+#   suwayomi:
+#     image: ghcr.io/suwayomi/tachidesk:latest
+#     container_name: suwayomi-server
+#     volumes:
+#       - ./suwayomi-data:/home/suwayomi/.local/share/Tachidesk
+#     ports:
+#       - "4567:4567"
+#     environment:
+#       - TZ=Europe/London
+#     restart: unless-stopped
+
+# networks:
+#   default:
+#     name: manga-network
