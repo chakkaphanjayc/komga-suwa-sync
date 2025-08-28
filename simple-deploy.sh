@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # =================================================================
 # Simple Deployment Script for Komga-Suwayomi Sync
