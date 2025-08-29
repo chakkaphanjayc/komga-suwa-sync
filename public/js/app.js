@@ -555,12 +555,11 @@ class SyncDashboard {
                         fieldName = `suwa-${key}`;
                     } else if (section === 'sync') {
                         const syncFieldMapping = {
-                            interval: 'sync-interval',
-                            fullSyncInterval: 'full-sync-interval',
-                            threshold: 'fuzzy-threshold',
-                            level: 'log-level',
-                            dryRun: 'dry-run',
-                            direction: 'sync-direction'
+                            'full-sync-interval': 'fullSyncInterval',
+                            'fuzzy-threshold': 'threshold',
+                            'log-level': 'level',
+                            'dry-run': 'dryRun',
+                            'sync-direction': 'direction'
                         };
                         fieldName = syncFieldMapping[key] || `sync-${key}`;
                     }
@@ -568,23 +567,13 @@ class SyncDashboard {
                     const element = document.getElementById(fieldName);
                     if (element) {
                         // Ensure input attributes reflect displayed units
-                        if (fieldName === 'sync-interval') {
-                            element.placeholder = element.placeholder || '30';
-                            element.min = 1;
-                            element.step = 1;
-                        } else if (fieldName === 'full-sync-interval') {
-                            element.placeholder = element.placeholder || '6';
+                        if (fieldName === 'full-sync-interval') {
+                            element.placeholder = element.placeholder || '1';
                             element.min = 1;
                             element.step = 1;
                         }
                         // Convert stored ms values to user-friendly units for display
-                        if (section === 'sync' && key === 'interval') {
-                            // Event sync interval stored in ms, display in seconds
-                            const ms = parseInt(config[section][key] || '0', 10) || 0;
-                            element.value = ms > 0 ? String(Math.round(ms / 1000)) : '';
-                            // If value looks like milliseconds (very large) but user-facing units are seconds,
-                            // clamp or convert if necessary (defensive). Already converted above.
-                        } else if (section === 'sync' && key === 'fullSyncInterval') {
+                        if (section === 'sync' && key === 'fullSyncInterval') {
                             // Full sync interval stored in ms, display in hours
                             const ms = parseInt(config[section][key] || '0', 10) || 0;
                             element.value = ms > 0 ? String(Math.round(ms / 3600000)) : '';
@@ -665,7 +654,6 @@ class SyncDashboard {
             } else if (type === 'sync') {
                 // Map HTML field names back to server config keys (keep dash-style keys expected by backend)
                 const reverseSyncFieldMapping = {
-                    'sync-interval': 'sync-interval',
                     'full-sync-interval': 'full-sync-interval',
                     'fuzzy-threshold': 'fuzzy-threshold',
                     'log-level': 'log-level',
@@ -675,17 +663,6 @@ class SyncDashboard {
                 configKey = reverseSyncFieldMapping[key] || key.replace('sync-', '');
 
                 // Validate numeric inputs before conversion
-                if (configKey === 'sync-interval') {
-                    // User provides seconds -> convert to ms
-                    const secs = parseFloat(value);
-                    if (Number.isNaN(secs) || secs <= 0) {
-                        this.showNotification('Event Sync Interval must be a positive number (seconds)', 'error');
-                        return;
-                    }
-                    config[configKey] = String(Math.round(secs * 1000));
-                    continue;
-                }
-
                 if (configKey === 'full-sync-interval') {
                     // User provides hours -> convert to ms
                     const hours = parseFloat(value);
@@ -1735,8 +1712,8 @@ class SyncDashboard {
                         // Refresh stats immediately
                         await this.loadInitialData();
                         // Start countdown timer
-                        if (config.sync && config.sync.interval) {
-                            this.startCountdownTimer(parseInt(config.sync.interval));
+                        if (config.sync && config.sync.fullSyncInterval) {
+                            this.startCountdownTimer(parseInt(config.sync.fullSyncInterval));
                         }
                     } else {
                         this.showError('Manual sync failed: ' + (data.error || 'Unknown error'));
@@ -1800,8 +1777,8 @@ class SyncDashboard {
                     await this.loadInitialData();
                     // Start countdown timer
                     this.loadConfig().then(config => {
-                        if (config.sync && config.sync.interval) {
-                            this.startCountdownTimer(parseInt(config.sync.interval));
+                        if (config.sync && config.sync.fullSyncInterval) {
+                            this.startCountdownTimer(parseInt(config.sync.fullSyncInterval));
                         }
                     });
                 } else {
@@ -1839,8 +1816,8 @@ class SyncDashboard {
                     await this.loadInitialData();
                     // Start countdown timer
                     this.loadConfig().then(config => {
-                        if (config.sync && config.sync.interval) {
-                            this.startCountdownTimer(parseInt(config.sync.interval));
+                        if (config.sync && config.sync.fullSyncInterval) {
+                            this.startCountdownTimer(parseInt(config.sync.fullSyncInterval));
                         }
                     });
                 } else {

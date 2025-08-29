@@ -17,7 +17,6 @@ const mappingRepo_1 = require("./core/mappingRepo");
 const komga_1 = require("./clients/komga");
 const suwa_1 = require("./clients/suwa");
 const matcher_1 = require("./core/matcher");
-const eventListener_1 = require("./core/eventListener");
 const normalize_1 = require("./utils/normalize");
 class WebDashboard {
     constructor() {
@@ -43,14 +42,6 @@ class WebDashboard {
         this.syncService = new sync_1.SyncService(this.komgaClient, this.suwaClient, this.mappingRepo, this.matcher);
         this.enhancedSyncService = new enhancedSync_1.EnhancedSyncService(this.komgaClient, this.suwaClient, this.mappingRepo, this.matcher);
         this.optimizedSyncService = new optimizedSync_1.OptimizedSyncService(this.komgaClient, this.suwaClient, this.mappingRepo, this.matcher);
-        this.eventListener = new eventListener_1.EventListener({
-            komgaClient: this.komgaClient,
-            suwaClient: this.suwaClient,
-            mappingRepo: this.mappingRepo,
-            enhancedSyncService: this.optimizedSyncService,
-            eventCheckInterval: parseInt(process.env.EVENT_CHECK_INTERVAL_MS || '10000'),
-            recentWindowHours: parseInt(process.env.RECENT_READ_HOURS || '1')
-        });
         this.setupMiddleware();
         this.setupRoutes();
         this.setupWebSocket();
@@ -1062,19 +1053,11 @@ class WebDashboard {
                     await this.runMatch();
                     break;
                 case 'start-event-listener':
-                    this.eventListener.start();
-                    this.io.emit('activity', {
-                        message: 'Event listener started via WebSocket',
-                        type: 'system'
-                    });
-                    break;
+                    // EventListener removed - return error
+                    throw new Error('Event listener has been removed to reduce CPU usage. Only scheduled full sync is available.');
                 case 'stop-event-listener':
-                    this.eventListener.stop();
-                    this.io.emit('activity', {
-                        message: 'Event listener stopped via WebSocket',
-                        type: 'system'
-                    });
-                    break;
+                    // EventListener removed - return error
+                    throw new Error('Event listener has been removed to reduce CPU usage. Only scheduled full sync is available.');
                 case 'sync-komga-to-suwa':
                     await this.optimizedSyncService.sync({
                         mode: 'full',
@@ -1349,42 +1332,30 @@ class WebDashboard {
         }
     }
     getEventListenerStatus(req, res) {
-        try {
-            const status = this.eventListener.getStatus();
-            res.json(status);
-        }
-        catch (error) {
-            logger_1.logger.error(error, 'Failed to get event listener status');
-            res.status(500).json({ error: error.message });
-        }
+        // EventListener removed - return disabled status
+        res.json({
+            isRunning: false,
+            eventCheckInterval: 0,
+            recentWindowHours: 0,
+            lastKomgaCheck: null,
+            lastSuwaCheck: null,
+            status: 'disabled',
+            message: 'Event listener has been removed to reduce CPU usage. Only scheduled full sync is available.'
+        });
     }
     startEventListener(req, res) {
-        try {
-            this.eventListener.start();
-            this.io.emit('activity', {
-                message: 'Event listener started',
-                type: 'system'
-            });
-            res.json({ success: true, message: 'Event listener started' });
-        }
-        catch (error) {
-            logger_1.logger.error(error, 'Failed to start event listener');
-            res.status(500).json({ error: error.message });
-        }
+        // EventListener removed - return error
+        res.status(400).json({
+            success: false,
+            error: 'Event listener has been removed to reduce CPU usage. Only scheduled full sync is available.'
+        });
     }
     stopEventListener(req, res) {
-        try {
-            this.eventListener.stop();
-            this.io.emit('activity', {
-                message: 'Event listener stopped',
-                type: 'system'
-            });
-            res.json({ success: true, message: 'Event listener stopped' });
-        }
-        catch (error) {
-            logger_1.logger.error(error, 'Failed to stop event listener');
-            res.status(500).json({ error: error.message });
-        }
+        // EventListener removed - return error
+        res.status(400).json({
+            success: false,
+            error: 'Event listener has been removed to reduce CPU usage. Only scheduled full sync is available.'
+        });
     }
     start(port = 3000) {
         this.server.listen(port, () => {

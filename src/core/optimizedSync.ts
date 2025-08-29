@@ -53,7 +53,7 @@ export class OptimizedSyncService {
   ) {}
 
   async sync(options: {
-    mode: 'full' | 'recent' | 'event-based';
+    mode: 'full';
     maxHoursForRecent?: number;
     forceFullSync?: boolean;
     direction?: 'bidirectional' | 'komga-to-suwa' | 'suwa-to-komga';
@@ -64,10 +64,6 @@ export class OptimizedSyncService {
 
     try {
       switch (mode) {
-        case 'event-based':
-        case 'recent':
-          await this.syncRecentlyRead(maxHoursForRecent, direction);
-          break;
         case 'full':
         default:
           await this.syncFullLibrary(direction, forceFullSync);
@@ -76,24 +72,6 @@ export class OptimizedSyncService {
     } catch (err) {
       logger.error(err, 'Optimized sync cycle failed');
     }
-  }
-
-  private async syncRecentlyRead(maxHours: number = 24, direction: 'bidirectional' | 'komga-to-suwa' | 'suwa-to-komga' = 'bidirectional') {
-    logger.info({ maxHours, direction }, 'Starting optimized event-based sync');
-
-    const recentlyReadChapters = await this.repo.getRecentlyReadChapters(maxHours);
-    logger.info({ count: recentlyReadChapters.length }, 'Found recently read chapters');
-
-    if (recentlyReadChapters.length === 0) {
-      logger.info('No recently read chapters found, skipping sync');
-      return;
-    }
-
-    // Group chapters by series to batch API calls
-    const chaptersBySeries = this.groupChaptersBySeries(recentlyReadChapters);
-
-    await this.syncChaptersBySeries(chaptersBySeries, direction);
-    logger.info('Completed optimized event-based sync cycle');
   }
 
   private async syncFullLibrary(direction: 'bidirectional' | 'komga-to-suwa' | 'suwa-to-komga' = 'bidirectional', force: boolean = false) {

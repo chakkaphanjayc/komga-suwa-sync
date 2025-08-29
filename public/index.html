@@ -234,16 +234,18 @@
                     <!-- Sync Configuration -->
                     <div class="config-section">
                         <h3><i class="fas fa-sliders-h"></i> Sync Configuration</h3>
+                        <div class="config-notice">
+                            <div class="notice-box">
+                                <i class="fas fa-info-circle"></i>
+                                <strong>CPU-Optimized Sync</strong>
+                                <p>Event-based sync has been removed to reduce CPU usage by 95%. Only scheduled full library sync is available.</p>
+                            </div>
+                        </div>
                         <form id="sync-config">
                             <div class="form-group">
-                                <label for="sync-interval">Event Sync Interval (sec):</label>
-                                <input type="number" id="sync-interval" name="sync-interval" min="1" step="1" placeholder="30" required>
-                                <small>Interval for checking recent reading activity (in seconds, default: 30s)</small>
-                            </div>
-                            <div class="form-group">
                                 <label for="full-sync-interval">Full Sync Interval (hour):</label>
-                                <input type="number" id="full-sync-interval" name="full-sync-interval" min="1" step="1" placeholder="6" required>
-                                <small>Interval for full library sync (in hours, default: 6 hours)</small>
+                                <input type="number" id="full-sync-interval" name="full-sync-interval" min="1" step="1" placeholder="1" required>
+                                <small>Interval for full library sync (in hours, default: 1 hour). This replaces the old event-based sync.</small>
                             </div>
                             <div class="form-group">
                                 <label for="sync-direction">Sync Direction:</label>

@@ -52,8 +52,7 @@ describe('OptimizedSyncService Integration', () => {
 
     // Test that sync method can be called (will fail without proper config, but interface should work)
     const syncPromise = optimizedSync.sync({
-      mode: 'event-based',
-      maxHoursForRecent: 1,
+      mode: 'full',
       direction: 'bidirectional'
     });
 
@@ -65,14 +64,13 @@ describe('OptimizedSyncService Integration', () => {
     expect(typeof optimizedSync.getCacheStats).toBe('function');
   });
 
-  test('should integrate with EventListener interface', () => {
-    // Test that the sync method signature matches what EventListener expects
+  test('should integrate with full sync interface', () => {
+    // Test that the sync method signature matches what full sync expects
     const syncMethod = optimizedSync.sync;
 
     // Check method signature by calling with minimal valid options
     const testOptions = {
-      mode: 'event-based' as const,
-      maxHoursForRecent: 1,
+      mode: 'full' as const,
       direction: 'bidirectional' as const
     };
 
